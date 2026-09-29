@@ -22,6 +22,8 @@ import {
 } from "@/canvas/board"
 import type { CanvasAlignmentGuide } from "@/canvas/alignment-guides"
 import { resolveCanvasAlignmentGuides } from "@/canvas/alignment-guides"
+import type { CanvasGridSettings } from "@/canvas/grid"
+import { snapCanvasDragDelta } from "@/canvas/grid"
 import { cloneCanvasDocument } from "@/canvas/canvas-history"
 import {
   createCanvasEdge,
@@ -108,6 +110,14 @@ interface CanvasEditorGestureOptions {
   selectionBox: CanvasEditorSelectionBoxState
   selectedEdge: ComputedRef<CanvasEdge | null>
   showDragAlignmentGuides: ComputedRef<boolean>
+  /**
+   * 网格设置（样式/间距/吸附）。
+   *
+   * 为什么整份对象传进来而不是传 `gridSnap` + `gridSize` 两个值：
+   * 吸附与间距是同一件事的两面，分两个 ref 传很容易出现
+   * "吸附开关更新了但间距还是上一轮"的中间态（同一次设置改动被拆成两次响应式更新）。
+   */
+  gridSettings: Ref<CanvasGridSettings>
   autoCreateTextCardOnDrag: ComputedRef<boolean>
   stageRef: Ref<HTMLElement | undefined>
   state: CanvasEditorState
@@ -131,6 +141,7 @@ export function createCanvasEditorGestureHandlers(options: CanvasEditorGestureOp
     selectionBox,
     selectedEdge,
     showDragAlignmentGuides,
+    gridSettings,
     autoCreateTextCardOnDrag,
     stageRef,
     state,
@@ -438,11 +449,22 @@ export function createCanvasEditorGestureHandlers(options: CanvasEditorGestureOp
     movingNodeIds: string[]
     nodes: CanvasNode[]
   }) {
+    /**
+     * ★ 顺序：**先吸网格，再让对齐辅助线微调** ★
+     *
+     *   两者都会改写同一个 delta，先后必然互相覆盖，所以要明确优先级：
+     *     · 网格是"背景参考线"，用户要的是**大致落在格子上**；
+     *     · 辅助线是"我在跟旁边的卡片对齐"，是**更强的意图**，阈值只有屏幕 8px。
+     *   ⇒ 先网格归位，再让辅助线在 8px 内把它拉到邻居的边/中线上。
+     *     反过来（先辅助线后网格）会把刚对齐好的结果再推走，辅助线等于白做。
+     */
+    const snapped = applyGridSnapToDragDelta(options)
+
     if (!showDragAlignmentGuides.value) {
       clearAlignmentGuides()
       return {
-        deltaX: options.deltaX,
-        deltaY: options.deltaY,
+        deltaX: snapped.deltaX,
+        deltaY: snapped.deltaY,
         guides: [],
       }
     }
@@ -450,11 +472,54 @@ export function createCanvasEditorGestureHandlers(options: CanvasEditorGestureOp
     // 基于当前视口缩放比例自适应调整吸附阈值，确保在不同缩放比例下，屏幕上物理吸附距离保持约 8 像素
     const resolved = resolveCanvasAlignmentGuides({
       ...options,
+      deltaX: snapped.deltaX,
+      deltaY: snapped.deltaY,
       threshold: 8 / viewport.scale,
     })
     alignmentGuides.guides = resolved.guides
     alignmentGuides.visible = resolved.guides.length > 0
     return resolved
+  }
+
+  /**
+   * 网格吸附（关闭时原样返回）。
+   *
+   * ★ 锚点节点怎么选 ★
+   *   多选拖动时整组一起动，必须挑**一个**节点作为"要落在网格上的那个"，
+   *   其余节点跟随同一修正量（组内相对位置不变）。
+   *   这里取 `movingNodeIds[0]` 在**拖动开始快照**（`options.nodes`）里的位置 ——
+   *   `options.nodes` 传进来的就是拖动起点的快照（见两处调用点的 `nodes: initialNodes`），
+   *   所以"初始位置 + delta = 目标位置"这个等式成立。
+   *
+   *   不取鼠标下的那个节点：那个 id 在事件里更靠后、拿不到稳定顺序，
+   *   而 `movingNodeIds[0]` 至少是**每次拖动都同一个**，行为可预测、可测。
+   */
+  function applyGridSnapToDragDelta(options: {
+    deltaX: number
+    deltaY: number
+    movingNodeIds: string[]
+    nodes: CanvasNode[]
+  }): { deltaX: number, deltaY: number } {
+    const grid = gridSettings.value
+    if (!grid?.snap) {
+      return { deltaX: options.deltaX, deltaY: options.deltaY }
+    }
+
+    const anchorId = options.movingNodeIds[0]
+    const anchor = anchorId
+      ? options.nodes.find((node) => node.id === anchorId)
+      : undefined
+    if (!anchor) {
+      return { deltaX: options.deltaX, deltaY: options.deltaY }
+    }
+
+    return snapCanvasDragDelta({
+      anchorX: anchor.x,
+      anchorY: anchor.y,
+      deltaX: options.deltaX,
+      deltaY: options.deltaY,
+      size: grid.size,
+    })
   }
 
   function isNodeGestureTarget(target: EventTarget | null): boolean {
@@ -1127,7 +1192,8 @@ export function createCanvasEditorGestureHandlers(options: CanvasEditorGestureOp
         setCanvasNodeGeometry(
           state.document,
           node.id,
-          resizeCanvasNodeFromSide(node, side, dx / viewport.scale, dy / viewport.scale),
+          // 传网格设置：开了吸附时，正在拖的那条边会吸到网格线上
+          resizeCanvasNodeFromSide(node, side, dx / viewport.scale, dy / viewport.scale, gridSettings.value),
         ),
         { coalesceKey: `resize-${node.id}-${side}` },
       )
@@ -1150,7 +1216,8 @@ export function createCanvasEditorGestureHandlers(options: CanvasEditorGestureOp
         setCanvasNodeGeometry(
           state.document,
           node.id,
-          resizeCanvasNodeFromCorner(node, dx / viewport.scale, dy / viewport.scale),
+          // 角缩放同理：右下两条边分别吸网格
+          resizeCanvasNodeFromCorner(node, dx / viewport.scale, dy / viewport.scale, gridSettings.value),
         ),
         { coalesceKey: `resize-corner-${node.id}` },
       )

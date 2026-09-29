@@ -142,7 +142,7 @@ function confirmMock(
   })
 }
 
-const WORKSPACE_DIR = "/data/storage/petal/siyuan-diskcanvas-next"
+const WORKSPACE_DIR = "/data/storage/petal/siyuan-diskcanvas"
 const apiMock = {
   putFile: vi.fn(async (path: string, _isDir: boolean, file: Blob) => {
     workspaceFiles.set(path, await file.text())
@@ -602,8 +602,8 @@ describe("useCanvasEditor file lifecycle flows", () => {
     }])
     expect(editor.filePickerDialog.groups.canvases).toEqual([{
       kind: "canvas",
-      path: "/data/storage/petal/siyuan-diskcanvas-next/road.canvas",
-      subtitle: "/data/storage/petal/siyuan-diskcanvas-next/road.canvas",
+      path: "/data/storage/petal/siyuan-diskcanvas/road.canvas",
+      subtitle: "/data/storage/petal/siyuan-diskcanvas/road.canvas",
       title: "road.canvas",
     }])
 
@@ -1164,6 +1164,273 @@ describe("useCanvasEditor file lifecycle flows", () => {
     wrapper.unmount()
   })
 
+  it("opens a nested canvas node by opening it in a NEW tab (not by switching the current one)", async () => {
+    /**
+     * ★ 用户需求（第 34 轮）：「双击可以打开画布。打开的时候是新打开画布。」★
+     *
+     * 判据是**双向**的：
+     *   ① 确实调了 `plugin.openCanvasTab({ path })` —— 新开一个画布页签；
+     *   ② **当前编辑器没有被切走**（`state.filePath` 原样不动）
+     *      —— 这正是"新打开"与"当前页签内切换"的分水岭。
+     *      只断言 ① 的话，将来有人顺手改成 `openWorkspacePath` 也照样过，
+     *      而那恰好是用户明确不要的行为。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const { editor, plugin, wrapper } = await mountEditor()
+
+    editor.addNode("file")
+    await flushEditor()
+    editor.updateNodeField("file", nestedPath)
+    // ★ 元数据刷新是异步的（document watch → refreshFileNodeMetadata → fetch 读文件），
+    //   一次 flush 只保证 watch 被触发，读盘结果落回 `fileNodeMeta` 还要等下一轮。
+    await flushEditor()
+    await flushEditor()
+
+    const node = editor.state.document.nodes[0]
+    // 前提：这个节点确实被解析成 canvas（否则测的是别的分支）
+    expect(editor.getFileNodePreview(node).kind).toBe("canvas")
+
+    const pathBefore = editor.state.filePath
+
+    await editor.activateNode(node)
+    await flushEditor()
+
+    // ① 新开页签打开那张画布
+    expect(plugin.openCanvasTab).toHaveBeenCalledWith({ path: nestedPath })
+    // ② 当前页签**没被换掉**
+    expect(editor.state.filePath).toBe(pathBefore)
+    // 也不该走"打开另一个文件"那条链（它才是切换当前页签的实现）
+    expect(openTab).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it("reports an error instead of silently switching tabs when opening a new canvas tab is unavailable", async () => {
+    /**
+     * ★ 能力缺失时必须**明确报错**，不能静默退回"当前页签内切换" ★
+     *
+     * 静默降级会让用户以为"新开了"，实际把正在编辑的画布换掉了 ——
+     * 旧页签的未保存内容就再也回不来。所以这里守着两件事：
+     *   ① 弹一条错误提示；
+     *   ② **一个字节都没动**（filePath 不变）。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const { editor, plugin, wrapper } = await mountEditor()
+    // 模拟"宿主插件没有提供新开页签能力"（老版本 / 独立页 stub）
+    delete (plugin as any).openCanvasTab
+
+    editor.addNode("file")
+    await flushEditor()
+    editor.updateNodeField("file", nestedPath)
+    await flushEditor()
+    await flushEditor()
+
+    const node = editor.state.document.nodes[0]
+    expect(editor.getFileNodePreview(node).kind).toBe("canvas")
+    const pathBefore = editor.state.filePath
+
+    await editor.activateNode(node)
+    await flushEditor()
+
+    expect(showMessage).toHaveBeenCalled()
+    expect(editor.state.filePath).toBe(pathBefore)
+
+    wrapper.unmount()
+  })
+
+  it("opens a nested canvas in a NEW standalone web page when running inside the standalone editor", async () => {
+    /**
+     * ★★ 用户需求（第 35 轮）：分场景打开子画布 ★★
+     *
+     * 用户原话：「就是说双击子画布，如果是在思源的画布页签里面就另开一个思源的
+     *           画布页签，如果是独立网页打开的就另开一个独立网页的页签。」
+     *
+     * 这是与上一条用例**互补**的另一半：
+     *   · 思源页签里  → `plugin.openCanvasTab`（思源画布页签）  ← 上一条
+     *   · 独立网页里  → `window.open(standalone URL)`（独立网页页签） ← 本条
+     *
+     * ★ 为什么独立页里绝不能调 `openCanvasTab` ★
+     *   那个 API 归思源宿主管，会把页签开在**思源那个窗口**里；
+     *   用户正在独立窗口里干活，焦点却跑去另一个窗口，与操作预期相反。
+     *
+     * 判据是双向的：
+     *   ① `window.open` 收到了一个 **standalone 页面 URL**（路径参数正确、指向目标画布）；
+     *   ② `plugin.openCanvasTab` **一次都没被调用**（否则就是走错窗口了）。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const openedUrls: string[] = []
+    const openSpy = vi.spyOn(window, "open").mockImplementation(((url: string) => {
+      openedUrls.push(String(url))
+      return {} as Window
+    }) as any)
+
+    try {
+      const { editor, plugin, wrapper } = await mountEditor({ standalone: true })
+      // 独立页 URL 由 `plugin.name` / `plugin.version` 拼出，测试里补上
+      ;(plugin as any).name = "siyuan-diskcanvas"
+      ;(plugin as any).version = "9.9.9"
+
+      editor.addNode("file")
+      await flushEditor()
+      editor.updateNodeField("file", nestedPath)
+      await flushEditor()
+      await flushEditor()
+
+      const node = editor.state.document.nodes[0]
+      expect(editor.getFileNodePreview(node).kind).toBe("canvas")
+
+      await editor.activateNode(node)
+      await flushEditor()
+
+      // ① 开的是一个独立页 URL，且带正确的路径与版本（缓存击穿）
+      expect(openedUrls).toHaveLength(1)
+      expect(openedUrls[0]).toContain("/plugins/siyuan-diskcanvas/standalone.html")
+      expect(openedUrls[0]).toContain(`path=${encodeURIComponent(nestedPath)}`)
+      expect(openedUrls[0]).toContain("v=9.9.9")
+
+      // ② 绝不能调思源的 openCanvasTab —— 那会把页签开到思源窗口里
+      expect(plugin.openCanvasTab).not.toHaveBeenCalled()
+
+      wrapper.unmount()
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
+  it("reports an error when the standalone page is blocked by the popup blocker", async () => {
+    /**
+     * ★ 弹窗被拦时**必须报错**，不能静默失败 ★
+     *
+     * `window.open` 被拦截时返回 `null`。此时页签没开成，
+     * 若不给提示，用户只会觉得"双击坏了"（与第 34 轮那个静默 bug 同一类症状）。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const openSpy = vi.spyOn(window, "open").mockImplementation((() => null) as any)
+
+    try {
+      const { editor, plugin, wrapper } = await mountEditor({ standalone: true })
+      ;(plugin as any).name = "siyuan-diskcanvas"
+
+      editor.addNode("file")
+      await flushEditor()
+      editor.updateNodeField("file", nestedPath)
+      await flushEditor()
+      await flushEditor()
+
+      const node = editor.state.document.nodes[0]
+      expect(editor.getFileNodePreview(node).kind).toBe("canvas")
+      const pathBefore = editor.state.filePath
+
+      showMessage.mockClear()
+      await editor.activateNode(node)
+      await flushEditor()
+
+      expect(showMessage).toHaveBeenCalled()
+      // 一个字节都没动
+      expect(editor.state.filePath).toBe(pathBefore)
+
+      wrapper.unmount()
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
+  it("does not open a nested canvas node in embed preview mode", async () => {
+    /**
+     * ★ 嵌入预览下双击**不得打开任何东西**（既有铁律）★
+     *
+     * 第 34 轮为 canvas 新增了"新开页签打开"分支，必须确认它同样受
+     * `capabilities.openNodeTab` 闸门约束 —— 否则预览态会出现
+     * "双击嵌进去的画布卡片，在宿主里凭空多开一个画布页签"这种跑飞行为。
+     *
+     * ★ 为什么直接构造节点、不走 `addNode` ★
+     *   预览态下 `capabilities.editDocument` 为 false ⇒ `addNode` 本身就被挡住了，
+     *   走它根本造不出节点，测试会变成"在断言一个不存在的场景"。
+     *   这里要测的是 `activateNode` 的**能力闸门**，那就直接喂给它一个
+     *   形状正确的 canvas file 节点，断言它**一个字节都没动**。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const { editor, wrapper } = await mountEditor({ embed: true })
+
+    const nestedNode = {
+      file: nestedPath,
+      height: 160,
+      id: "embed-canvas-node",
+      type: "file" as const,
+      width: 240,
+      x: 0,
+      y: 0,
+    }
+
+    const before = editor.state.filePath
+    await editor.activateNode(nestedNode as any)
+    await flushEditor()
+
+    // 路径没变、也没读那个文件（预览态连"打开"这条链都不该启动）
+    expect(editor.state.filePath).toBe(before)
+    expect(editor.state.document.nodes).not.toContainEqual(
+      expect.objectContaining({ text: "nested canvas content" }),
+    )
+
+    wrapper.unmount()
+  })
+
+  it("invokes openCanvasTab with the plugin as the receiver (this-binding)", async () => {
+    /**
+     * ★★ 回归守卫：`openCanvasTab` 必须**带着 `plugin` 调用** ★★
+     *
+     * 真机踩过的坑：写成 `const fn = plugin.openCanvasTab; await fn(...)`
+     * 之后 `this` 就丢了，宿主实现里的 `this.t("untitledCanvas")` 直接抛
+     * `TypeError: Cannot read properties of undefined (reading 't')`。
+     * 该异常发生在 async 函数内 ⇒ 变成未处理的 rejection 被静默吞掉，
+     * 用户看到的现象是「双击之后什么都没发生」—— 新页签没开、也没提示。
+     *
+     * 所以这里的 mock 是 **this-敏感**的：`this` 不对就抛。
+     * 光断言 `toHaveBeenCalledWith` 是拦不住这个 bug 的（丢了 `this` 照样被记到调用）。
+     */
+    const nestedPath = `${WORKSPACE_DIR}/售前规划.canvas`
+    workspaceFiles.set(nestedPath, createCanvasRaw("nested canvas content"))
+
+    const { editor, plugin, wrapper } = await mountEditor()
+
+    // 换成 this-敏感实现：this 不是 plugin 就抛（模拟真机上 this.t 报错的效果）
+    const receivedThis: unknown[] = []
+    ;(plugin as any).openCanvasTab = function (this: unknown, bootstrap: unknown) {
+      receivedThis.push(this)
+      if (this !== plugin) {
+        throw new TypeError("Cannot read properties of undefined (reading 't')")
+      }
+      return Promise.resolve()
+    }
+
+    editor.addNode("file")
+    await flushEditor()
+    editor.updateNodeField("file", nestedPath)
+    await flushEditor()
+    await flushEditor()
+
+    const node = editor.state.document.nodes[0]
+    expect(editor.getFileNodePreview(node).kind).toBe("canvas")
+
+    await editor.activateNode(node)
+    await flushEditor()
+
+    expect(receivedThis.length).toBe(1)
+    expect(receivedThis[0]).toBe(plugin)
+
+    wrapper.unmount()
+  })
+
   it("resolves a copied image block id into an image preview", async () => {
     fileNodeLookupMock.findSiyuanBlockById.mockResolvedValue({
       hpath: "/Projects/Roadmap",
@@ -1526,7 +1793,7 @@ describe("useCanvasEditor file lifecycle flows", () => {
   })
 
   it("opens a workspace canvas path through a dialog when prompt is unavailable", async () => {
-    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas-next/opened.canvas", createCanvasRaw("opened from workspace"))
+    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas/opened.canvas", createCanvasRaw("opened from workspace"))
     queueDialogResponse("opened")
 
     const { editor, plugin, wrapper } = await mountEditor()
@@ -1535,20 +1802,20 @@ describe("useCanvasEditor file lifecycle flows", () => {
     await flushEditor()
 
     expect(window.prompt).not.toHaveBeenCalled()
-    expect(editor.state.filePath).toBe("/data/storage/petal/siyuan-diskcanvas-next/opened.canvas")
+    expect(editor.state.filePath).toBe("/data/storage/petal/siyuan-diskcanvas/opened.canvas")
     expect(editor.state.document.nodes[0]).toMatchObject({
       id: "n1",
       text: "opened from workspace",
       type: "text",
     })
     expect(plugin.rememberRecentCanvas).toHaveBeenCalledWith(
-      "/data/storage/petal/siyuan-diskcanvas-next/opened.canvas",
+      "/data/storage/petal/siyuan-diskcanvas/opened.canvas",
       "opened.canvas",
       "workspace",
     )
     expect(editor.recentFiles).toEqual([
       expect.objectContaining({
-        path: "/data/storage/petal/siyuan-diskcanvas-next/opened.canvas",
+        path: "/data/storage/petal/siyuan-diskcanvas/opened.canvas",
         title: "opened.canvas",
       }),
     ])
@@ -1617,7 +1884,7 @@ describe("useCanvasEditor file lifecycle flows", () => {
     await editor.save()
     await flushEditor()
 
-    const savedPath = "/data/storage/petal/siyuan-diskcanvas-next/saved-workspace.canvas"
+    const savedPath = "/data/storage/petal/siyuan-diskcanvas/saved-workspace.canvas"
     const savedRaw = workspaceFiles.get(savedPath)
 
     expect(window.prompt).not.toHaveBeenCalled()
@@ -1672,10 +1939,10 @@ describe("useCanvasEditor file lifecycle flows", () => {
   })
 
   it("re-prompts for a new workspace filename after overwrite is declined", async () => {
-    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas-next/existing.canvas", createCanvasRaw("already there"))
-    queueDialogResponse("/data/storage/petal/siyuan-diskcanvas-next/existing.canvas")
+    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas/existing.canvas", createCanvasRaw("already there"))
+    queueDialogResponse("/data/storage/petal/siyuan-diskcanvas/existing.canvas")
     queueConfirmResponse(false)
-    queueDialogResponse("/data/storage/petal/siyuan-diskcanvas-next/renamed.canvas")
+    queueDialogResponse("/data/storage/petal/siyuan-diskcanvas/renamed.canvas")
 
     const { editor, wrapper } = await mountEditor()
 
@@ -1689,14 +1956,14 @@ describe("useCanvasEditor file lifecycle flows", () => {
     await flushEditor()
 
     expect(confirm).toHaveBeenCalledOnce()
-    expect(workspaceFiles.get("/data/storage/petal/siyuan-diskcanvas-next/existing.canvas")).toContain("\"text\": \"already there\"")
-    expect(workspaceFiles.get("/data/storage/petal/siyuan-diskcanvas-next/renamed.canvas")).toContain("\"text\": \"saved after rename\"")
+    expect(workspaceFiles.get("/data/storage/petal/siyuan-diskcanvas/existing.canvas")).toContain("\"text\": \"already there\"")
+    expect(workspaceFiles.get("/data/storage/petal/siyuan-diskcanvas/renamed.canvas")).toContain("\"text\": \"saved after rename\"")
 
     wrapper.unmount()
   })
 
   it("captures external save conflicts and can overwrite the disk version afterwards", async () => {
-    const path = "/data/storage/petal/siyuan-diskcanvas-next/conflict.canvas"
+    const path = "/data/storage/petal/siyuan-diskcanvas/conflict.canvas"
     workspaceFiles.set(path, createCanvasRaw("original on disk"))
 
     queueDialogResponse(path)
@@ -1731,7 +1998,7 @@ describe("useCanvasEditor file lifecycle flows", () => {
   })
 
   it("loads the newer disk version into the editor after a conflict is detected", async () => {
-    const path = "/data/storage/petal/siyuan-diskcanvas-next/load-conflict.canvas"
+    const path = "/data/storage/petal/siyuan-diskcanvas/load-conflict.canvas"
     workspaceFiles.set(path, createCanvasRaw("before conflict"))
 
     queueDialogResponse(path)
@@ -1776,24 +2043,24 @@ describe("useCanvasEditor file lifecycle flows", () => {
 
     const { editor, wrapper } = await mountEditor()
 
-    expect(apiMock.readDir).toHaveBeenCalledWith("/data/storage/petal/siyuan-diskcanvas-next")
+    expect(apiMock.readDir).toHaveBeenCalledWith("/data/storage/petal/siyuan-diskcanvas")
     expect(editor.workspaceDocuments).toEqual([
       {
         type: "folder",
-        path: "/data/storage/petal/siyuan-diskcanvas-next/nested",
+        path: "/data/storage/petal/siyuan-diskcanvas/nested",
         name: "nested",
         children: [],
       },
       {
         type: "file",
-        path: "/data/storage/petal/siyuan-diskcanvas-next/alpha.canvas",
+        path: "/data/storage/petal/siyuan-diskcanvas/alpha.canvas",
         name: "alpha.canvas",
         updated: undefined,
         created: undefined,
       },
       {
         type: "file",
-        path: "/data/storage/petal/siyuan-diskcanvas-next/beta.canvas",
+        path: "/data/storage/petal/siyuan-diskcanvas/beta.canvas",
         name: "beta.canvas",
         updated: undefined,
         created: undefined,
@@ -1804,7 +2071,7 @@ describe("useCanvasEditor file lifecycle flows", () => {
   })
 
   it("keeps recent files from both workspace and local opens", async () => {
-    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas-next/workspace.canvas", createCanvasRaw("workspace version"))
+    workspaceFiles.set("/data/storage/petal/siyuan-diskcanvas/workspace.canvas", createCanvasRaw("workspace version"))
 
     queueDialogResponse("workspace")
     const { editor, wrapper } = await mountEditor()
@@ -1827,7 +2094,7 @@ describe("useCanvasEditor file lifecycle flows", () => {
 
     expect(editor.recentFiles.map((item: any) => item.path)).toEqual([
       localPath,
-      "/data/storage/petal/siyuan-diskcanvas-next/workspace.canvas",
+      "/data/storage/petal/siyuan-diskcanvas/workspace.canvas",
     ])
     expect(editor.recentFiles.map((item: any) => item.sourceType)).toEqual([
       "local",

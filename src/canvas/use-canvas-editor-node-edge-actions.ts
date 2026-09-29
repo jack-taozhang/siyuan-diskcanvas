@@ -42,6 +42,10 @@ import { isWebUrl } from '@/canvas/url-detection'
 import { centerViewportOnBounds } from '@/canvas/selection-toolbar'
 import { clampViewportScale, scaleViewportAtPoint } from '@/canvas/viewport'
 import { findNonOverlappingPosition } from '@/canvas/node-overlap'
+import {
+  normalizeCanvasGridSettings,
+  snapCanvasValueToGrid,
+} from '@/canvas/grid'
 import { findSproutRelations, type SproutRelationItem } from '@/canvas/siyuan-kernel-file-node-lookups'
 
 const MIND_MAP_HORIZONTAL_GAP = 80
@@ -226,10 +230,75 @@ export function createCanvasEditorNodeEdgeActions(options: CanvasEditorNodeEdgeA
 
   function addNodeAtPosition(type: CanvasNode['type'], canvasX: number, canvasY: number) {
     const node = createCanvasNode(type)
-    node.x = Math.round(canvasX)
-    node.y = Math.round(canvasY)
+
+    /**
+     * ★ 新建的卡片也要遵守网格吸附 ★
+     *
+     *   "吸附"如果只管拖动、不管新建，第一条规则就会在第一张卡片上失效：
+     *   用户在格子上双击建卡，卡片却落在两格之间 —— 之后无论怎么拖，
+     *   只要吸附的是"位移"就会一直差半格。既然开了吸附，落点就该一开始就在格上。
+     *
+     *   关闭吸附时保持原行为（四舍五入到整数像素），不做任何额外处理。
+     */
+    const grid = normalizeCanvasGridSettings(options.getSettings?.()?.grid)
+    node.x = grid.snap ? snapCanvasValueToGrid(canvasX, grid.size) : Math.round(canvasX)
+    node.y = grid.snap ? snapCanvasValueToGrid(canvasY, grid.size) : Math.round(canvasY)
     commitDocument(upsertCanvasNode(state.document, node))
     state.selectNode(node.id)
+  }
+
+  /**
+   * ★ 把「画布文件」作为**嵌套画布卡片**插入当前画布（画布文件管理窗口用）★
+   *
+   * 与 `addNodeAtPosition('file')` 的区别只有一个：落点。
+   *   那个是"在鼠标位置新建一张空卡片"，这里的语义是"把某个已存在的画布放进来"，
+   *   所以按**视口中心**落点 —— 从对话框里点插入时鼠标在对话框上，
+   *   用鼠标坐标会把卡片扔到看不见的地方。
+   *
+   * ★ 为什么必须挡住"把当前画布插进自己" ★
+   *   嵌套卡片显示的是**磁盘上那份文件的快照**（`loadCanvasTargetPreview` 只解析一层）。
+   *   自己嵌自己 ⇒ 卡片永远显示"上一次保存前"的内容，改完看不到变化，
+   *   用户会以为"插入没生效"。与其让人困惑，不如明确拒绝。
+   */
+  async function insertCanvasFileNode(
+    canvasPath: string,
+    stagePoint?: { x: number, y: number },
+  ): Promise<Extract<CanvasNode, { type: 'file' }> | null> {
+    const target = String(canvasPath || '').trim()
+    if (!target.toLowerCase().endsWith('.canvas')) {
+      return null
+    }
+    if (target === String(state.filePath || '').trim()) {
+      showMessage(t('messageCannotInsertSelfCanvas'), 5000, 'error')
+      return null
+    }
+
+    const node = createCanvasNode('file') as Extract<CanvasNode, { type: 'file' }>
+    node.file = target
+
+    const stage = stageRef?.value
+    const anchorX = stagePoint?.x ?? (stage ? stage.clientWidth / 2 : 200)
+    const anchorY = stagePoint?.y ?? (stage ? stage.clientHeight / 2 : 160)
+
+    // 世界坐标 → 板坐标（+board.left/top），并让卡片**中心**落在锚点上
+    const rawX = (anchorX - viewport.x) / viewport.scale + board.value.left - node.width / 2
+    const rawY = (anchorY - viewport.y) / viewport.scale + board.value.top - node.height / 2
+
+    // 与"新建卡片"同一套吸附规则：开了吸附，落点一开始就该在格上
+    const grid = normalizeCanvasGridSettings(getSettings?.()?.grid)
+    const snappedX = grid.snap ? snapCanvasValueToGrid(rawX, grid.size) : Math.round(rawX)
+    const snappedY = grid.snap ? snapCanvasValueToGrid(rawY, grid.size) : Math.round(rawY)
+
+    const position = findNonOverlappingPosition(
+      snappedX, snappedY, node.width, node.height, state.document.nodes, node.height + 20,
+    )
+    node.x = position.x
+    node.y = position.y
+
+    commitDocument(upsertCanvasNode(state.document, node))
+    state.selectNode(node.id)
+    await fileFieldRefresh()
+    return node
   }
 
   function findNonOverlappingTextNodePosition(
@@ -1200,6 +1269,7 @@ export function createCanvasEditorNodeEdgeActions(options: CanvasEditorNodeEdgeA
   return {
     addNode,
     addNodeAtPosition,
+    insertCanvasFileNode,
     applyEdgeColor,
     applyEdgeLineStyle,
     applySelectedNodeAsEdgeSource,

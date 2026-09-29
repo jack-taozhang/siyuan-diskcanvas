@@ -39,6 +39,12 @@ import {
   watch,
 } from "vue"
 import { resolveCanvasInteractionPolicy } from "@/canvas/canvas-interaction-policy"
+import { getNebulaClient } from "@/canvas/nebula-client-provider"
+// 独立页 URL 构造函数：独立网页里双击子画布时，另开一个独立网页页签要用到。
+// ★ 与工具栏「独立打开」共用同一份，保证"生成 URL / 解析 URL"严格互逆。
+import { buildStandalonePageUrl } from "@/standalone/standalone-url"
+import type { CanvasGridSettings } from "@/canvas/grid"
+import { normalizeCanvasGridSettings } from "@/canvas/grid"
 import {
   putFile,
   readDir,
@@ -179,6 +185,22 @@ export function useCanvasEditor(
   const colorThemeId = ref<CanvasColorThemeId>(
     getPluginSettings().colorTheme ?? "classic",
   )
+
+  /**
+   * 网格线设置（样式 / 间距 / 吸附）。
+   *
+   * ★ 为什么在编辑器里也存一份 ref，而不是每次现读设置 ★
+   *   理由与 `colorThemeId` 完全相同：工具栏改完要**立刻生效**，
+   *   不能等"写盘 → 宿主广播 → 再读回来"这一个来回（在独立网页里那个来回还要多一跳）。
+   *   现读设置的老路只能在设置面板里用（那里本来就整份重画）。
+   *   两条入口都通过 `setCanvasGridSettings` 写，外部变更再由
+   *   `handleExternalSettingsChange` 反向同步回来 —— 单一数据流。
+   */
+  const gridSettings = ref<CanvasGridSettings>(
+    normalizeCanvasGridSettings(getPluginSettings().grid),
+  )
+  /** 网格设置落盘的防抖计时器（见 setCanvasGridSettings 的注释） */
+  let gridPersistTimer = 0
   const settingsVersion = ref(0)
   const currentColorStyles = computed(() =>
     buildColorStyles(getColorThemeById(colorThemeId.value)),
@@ -478,6 +500,38 @@ export function useCanvasEditor(
   }
 
   /**
+   * 改网格设置（工具栏弹层与设置面板共用这一个出口）。
+   *
+   * 先归一化再落地：**两份入口都用同一个归一化器**（`normalizeCanvasGridSettings`），
+   * 所以"工具栏选了 48、面板选了 300"这种越界值不会出现两种处理结果。
+   * 传的是**整份 grid 对象**（不是 partial）：设置层是浅合并，
+   * 传整份才能保证三项始终一致（否则可能只写进去 style、size 还是旧的）。
+   */
+  async function setCanvasGridSettings(patch: Partial<CanvasGridSettings>) {
+    const next = normalizeCanvasGridSettings({ ...gridSettings.value, ...patch })
+    gridSettings.value = next
+
+    /**
+     * ★ 落盘**防抖**（700ms）★
+     *
+     *   每次写 petal 都会让思源向所有前端广播 `reloadPlugin`（SiYuan #19187），
+     *   进而重载插件本体 —— 实测：写一次设置，约 6 秒后 `window.siyuan.ws.app.plugins`
+     *   里的插件实例被换掉一次（画布 DOM 不受影响，但这是一次真实的重载）。
+     *
+     *   而用户在弹层里调整通常是**连点三下**（样式 → 间距 → 吸附）。
+     *   不防抖 = 3 次重载；防抖后 = 1 次。UI 立刻生效（改的是本地 ref），
+     *   落盘延后一点点，用户感知不到差别。
+     */
+    if (gridPersistTimer) {
+      window.clearTimeout(gridPersistTimer)
+    }
+    gridPersistTimer = window.setTimeout(() => {
+      gridPersistTimer = 0
+      void plugin.updateCanvasSettings?.({ grid: { ...gridSettings.value } })
+    }, 700)
+  }
+
+  /**
    * ★ 已删除：notifyCanvasSearchChanged()（2026-09-28）★
    *
    *   原实现是 `searchListeners.forEach(listener => listener())`，
@@ -501,6 +555,16 @@ export function useCanvasEditor(
     const settings = getPluginSettings()
     if (settings.colorTheme && settings.colorTheme !== colorThemeId.value) {
       colorThemeId.value = settings.colorTheme
+    }
+    // 网格设置同理：设置面板改动后要同步回编辑器的 ref（工具栏弹层读的是它）
+    const nextGrid = normalizeCanvasGridSettings(settings.grid)
+    const currentGrid = gridSettings.value
+    if (
+      nextGrid.style !== currentGrid.style
+      || nextGrid.size !== currentGrid.size
+      || nextGrid.snap !== currentGrid.snap
+    ) {
+      gridSettings.value = nextGrid
     }
   }
 
@@ -1027,6 +1091,20 @@ export function useCanvasEditor(
   const isEmbedMode = Boolean(bootstrap.embed)
 
   /**
+   * 独立网页模式（`standalone.html` 挂载，见 `src/standalone.ts`）。
+   *
+   * ★ 与 `isEmbedMode` 的定位完全不同 ★
+   *   `isEmbedMode` 会参与**能力矩阵**（翻成一组只读能力）；
+   *   而独立页是**完全可编辑**的，它**不进** `resolveCanvasInteractionPolicy`。
+   *   它只影响「与宿主强绑定的动作该怎么做」这一件事，
+   *   目前唯一一处：双击网盘卡片时改用单独网页打开（见 `activateNode`）。
+   *
+   *   为什么不塞进能力矩阵：矩阵语义是"能不能做"，而这里是"怎么做"。
+   *   混进去会让 `editDocument` 之类的能力多出一个莫名其妙的信号源。
+   */
+  const isStandaloneMode = Boolean(bootstrap.standalone)
+
+  /**
    * ★★★ 交互能力策略 —— 所有只读守卫的**单一事实来源** ★★★
    *
    * 把三个原始信号（文档冲突 / 移动端 / 嵌入预览）解析成一组**具名能力**，
@@ -1065,6 +1143,7 @@ export function useCanvasEditor(
   const {
     addNode,
     addNodeAtPosition,
+    insertCanvasFileNode,
     applyEdgeColor,
     applyEdgeLineStyle,
     applySelectedNodeAsEdgeSource,
@@ -1315,6 +1394,101 @@ export function useCanvasEditor(
   }
 
   /**
+   * 在**单独网页**里打开网盘文件（独立页双击网盘卡片时走这条）。
+   *
+   * ★ 地址从哪来 ★
+   *   网盘契约的 `webUrl(mount, path, name)` —— 网盘侧按类型路由出
+   *   「浏览器可直接打开的地址」（CAD 深链 / `/api/raw` 签名直链 / kkFileView 预览页），
+   *   并顺手做了「容器内主机名 → 浏览器可达地址」的改写。
+   *   画布侧**一个字节的 URL 都不自己拼**（约束 C-4）。
+   *
+   * ★ 为什么拿不到能力时宁可报错也不猜 ★
+   *   老版本网盘没有 `webUrl`。若退回 `previewUrl`：
+   *     · office 会走 OnlyOffice —— 那**不是无状态查看页**，每次打开都可能
+   *       触发一次回写会话（网盘侧自己的注释里写明了这一点）；
+   *     · 原生类型（图片/pdf/文本）会绕一层转换，慢且可能转失败。
+   *   结果是一个"看起来打开了但不是用户想要的东西"的页面，
+   *   而报错至少能把原因说清楚（让用户去升级网盘插件）。
+   *
+   * @returns 是否真的开了窗（false ⇒ 调用方按"没打开"处理）
+   */
+  async function openNebulaInBrowser(
+    target: { mount: string, nebulaPath: string },
+    fileName: string,
+  ): Promise<boolean> {
+    const client = getNebulaClient(getPluginSettings().nebula)
+    if (!client) {
+      showMessage(t("messageNebulaPluginMissing"), 4000, "error")
+      return false
+    }
+
+    if (typeof client.webUrl !== "function") {
+      showMessage(t("messageNebulaWebOpenUnsupported"), 5000, "error")
+      return false
+    }
+
+    try {
+      const url = await client.webUrl(target.mount, target.nebulaPath, fileName)
+      /**
+       * 用 `window.open` 开新页签而不是 `location.href`：
+       * 画布留在原页，用户回来还能继续编辑（与「在独立网页中打开画布」同一个取向）。
+       * 双击是用户手势，不会被弹窗拦截；真被拦了也给出提示，不静默失败。
+       */
+      const opened = window.open(url, "_blank")
+      if (!opened) {
+        showMessage(t("messageNebulaWebOpenBlocked"), 5000, "error")
+        return false
+      }
+      return true
+    } catch (error) {
+      showMessage(
+        t("messageNebulaWebOpenFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        5000,
+        "error",
+      )
+      return false
+    }
+  }
+
+  /**
+   * 独立网页里双击子画布 ⇒ **另开一个独立网页页签**打开那张画布。
+   *
+   * ★ 为什么必须是"另一个独立网页"，而不是 `plugin.openCanvasTab` ★
+   *   独立页本身跑在 `window.opener` 之外的普通标签页里（`standalone.html`），
+   *   没有思源的页签体系。`openCanvasTab` 会把新页签开在**思源那个窗口**里，
+   *   用户明明在独立窗口里双击，焦点却跳去思源窗口 —— 与 `openNebulaInBrowser`
+   *   要规避的是同一个问题。
+   *
+   * ★ URL 复用 `buildStandalonePageUrl`（工具栏「独立打开」同一个构造函数）★
+   *   参数名（`path` / `v`）与编码方式必须与之严格互逆，否则会静默打开错误的文件。
+   *   ★ 带 `?v=<版本>`：内核给 `/plugins/**` 的静态响应没有 `Cache-Control`，
+   *     只有 `Last-Modified`，不加版本号可能命中启发式缓存里的旧页面。
+   *
+   * ★ 与工具栏按钮的区别：**不加 `noopener`** —— 理由是同一个：
+   *   独立页要靠 `window.opener.__nebuladiskPlugin` 复用网盘能力，
+   *   加了 `noopener` 等于把网盘功能一起关掉（功能依赖，非安全疏忽）。
+   */
+  function openCanvasInStandaloneTab(path: string): boolean {
+    const pluginName = (plugin as unknown as { name?: string }).name
+    if (!pluginName) {
+      showMessage(t("standaloneOpenFailed"), 4000, "error")
+      return false
+    }
+
+    const version = (plugin as unknown as { version?: string }).version
+    const url = buildStandalonePageUrl(pluginName, path, version)
+    // 弹窗被拦截时返回 null —— 要提示，否则用户以为双击坏了
+    const opened = window.open(url, "_blank")
+    if (!opened) {
+      showMessage(t("standaloneOpenBlocked"), 5000, "error")
+      return false
+    }
+    return true
+  }
+
+  /**
    * 双击节点时的「打开」行为。
    *
    * 目前支持两类：
@@ -1377,13 +1551,96 @@ export function useCanvasEditor(
         return true
       }
 
+      /**
+       * ★★ 嵌套画布：双击卡片 = **新开一个页签**打开那张画布 ★★
+       *
+       * 用户要求（第 34 轮）：「双击可以打开画布。打开的时候是新打开画布。」
+       *
+       * 「新打开」= 另开一个画布页签，**不动当前这个页签** ——
+       * 与文件管理器里点「打开」的语义（当前页签内切换）**刻意不同**：
+       *   · 管理器那个动作是"我要改去编辑另一个文件"（替换当前视图）；
+       *   · 双击卡片是"我想看看这张卡片背后是什么"（并列展开，随时回头）。
+       * 后者若把当前页签换掉，用户就"回不去了" —— 这正是要避免的。
+       *
+       * ★ 走既有 API `plugin.openCanvasTab({ path })` ★
+       *   与「新建画布文件后自动打开」是同一条路径
+       *   （见 use-canvas-editor-workspace-tree.ts 里 `plugin.openCanvasTab({ path: filePath })`），
+       *   不另造轮子 —— 页签 id、标题、bootstrap 这些细节由插件本体统一负责。
+       *
+       * ★ 拿不到该能力时**明确报错**，不静默退回"当前页签内切换" ★
+       *   静默降级会让用户以为"新开了"，实际把正在编辑的画布换掉了，
+       *   而且旧页签的未保存内容就再也回不来。宁可什么都不做 + 提示。
+       *
+       * ★★ 必须**带着 `plugin` 这个接收者**调用 ★★
+       *   实测踩过：先 `const fn = plugin.openCanvasTab` 再 `fn(...)`，
+       *   方法里的 `this` 丢了 ⇒ `this.t("untitledCanvas")` 直接抛
+       *   `TypeError: Cannot read properties of undefined (reading 't')`，
+       *   而它发生在 async 函数里 ⇒ 变成未处理的 rejection 被静默吞掉，
+       *   外部表现就是**双击之后什么都没发生**（新页签没开、也没有任何提示）。
+       *   所以这里一律用 `plugin.openCanvasTab(...)` 形式（或先做存在性检查再点调用）。
+       *
+       * ★★★ 分场景（第 35 轮，用户要求）★★★
+       *   用户原话：「现在从画布编辑里面打开子画布，是在当前页签切换的。而且在
+       *   独立网页打开的编辑界面会另开思源页签打开。点击子画布也是把当前独立网页
+       *   子画布，应该是用单独新网页打开。就是说双击子画布，如果是在思源的画布页签
+       *   里面就另开一个思源的画布页签，如果是独立网页打开的就另开一个独立网页的页签。」
+       *
+       * ⇒ 与 `nebula` 分支**完全同构**的两种打开方式：
+       *   · 思源页签里（`!isStandaloneMode`）
+       *       → `plugin.openCanvasTab({ path })` ⇒ 另开一个**思源画布页签**
+       *   · 独立网页里（`isStandaloneMode`）
+       *       → `window.open(buildStandalonePageUrl(...))` ⇒ 另开一个**独立网页页签**
+       *
+       *   为什么独立页里不能调 `plugin.openCanvasTab`：那 API 归思源宿主管，
+       *   会把新页签开在**思源那个窗口**里 —— 用户正在独立窗口里干活，焦点却跑去
+       *   另一个窗口，与操作预期正好相反（与 `openNebulaInBrowser` 同一个道理）。
+       */
+      if (resolved.kind === "canvas") {
+        if (isStandaloneMode) {
+          return openCanvasInStandaloneTab(resolved.path)
+        }
+
+        if (typeof plugin.openCanvasTab !== "function") {
+          showMessage(t("messageCanvasOpenTabUnavailable"), 4000, "error")
+          return false
+        }
+        await plugin.openCanvasTab({ path: resolved.path })
+        return true
+      }
+
       if (resolved.kind === "nebula") {
+        const fileName = resolved.nebulaPath.split("/").filter(Boolean).pop() ?? resolved.title
+
+        /**
+         * ★★ 独立网页里：双击网盘卡片 = 用**单独网页**打开该网盘文件 ★★
+         *
+         * 用户要求：「网页打开画布编辑时，双击网盘卡片，通过单独网页打开对应的网盘文件。」
+         *
+         * 为什么不能沿用下面的 `openFile()`：
+         *   那是网盘插件在**思源里开一个预览页签**的方法。独立页没有思源的页签体系，
+         *   调它只会把预览页签开在**思源那个窗口**里 —— 用户正在独立窗口里干活，
+         *   却看到焦点跑去了另一个窗口，与操作预期正好相反。
+         *
+         * 处置：改走网盘契约的 `webUrl()` —— 网盘侧已经有一个专门的调度器
+         *   （`browserViewUrl`），按类型给出「浏览器可直接打开」的地址：
+         *     · CAD → cad-viewer 深链
+         *     · pdf/图片/视频/音频/文本 → `/api/raw` 签名直链（零转换，最快）
+         *     · Office / 压缩包 / 其它 → kkFileView 在线预览页
+         *   地址改写（容器内主机名 → 浏览器可达）也在网盘侧完成。
+         *   ⇒ 我们这边**只负责开窗**，一个字节的 URL 都不自己拼（约束 C-4）。
+         *
+         * 拿不到这个能力时**明确报错**，不退回 previewUrl "猜一个" ——
+         * 老版本网盘的 previewUrl 对 office 会给错通道，猜出来的结果比报错更难排查。
+         */
+        if (isStandaloneMode) {
+          return await openNebulaInBrowser(resolved, fileName)
+        }
+
         const nebulaPlugin = getNebulaPlugin()
         if (!nebulaPlugin || typeof nebulaPlugin.openFile !== "function") {
           showMessage(t("messageNebulaPluginMissing"), 4000, "error")
           return false
         }
-        const fileName = resolved.nebulaPath.split("/").filter(Boolean).pop() ?? resolved.title
         // 与网盘 dock 双击文件完全同一条路径：交给对方的 openFile 决定用哪个预览通道。
         nebulaPlugin.openFile({
           mount: resolved.mount,
@@ -1453,6 +1710,8 @@ export function useCanvasEditor(
     state,
     viewport,
     showDragAlignmentGuides: computed(() => getReactivePluginSettings().showDragAlignmentGuides !== false),
+    // 网格设置整份传下去：手势层要用 size 做吸附、用 snap 决定是否吸附
+    gridSettings,
     autoCreateTextCardOnDrag: computed(() => getReactivePluginSettings().autoCreateTextCardOnDrag),
     showNodeHeader: computed(() => getReactivePluginSettings().showNodeHeader),
   })
@@ -1571,6 +1830,12 @@ export function useCanvasEditor(
     window.removeEventListener("keydown", handleKeydown)
     window.removeEventListener("diskcanvas-settings-changed", handleExternalSettingsChange)
     blockJumpHighlighter.dispose()
+    // 网格设置的防抖计时器也要清掉：组件销毁后再写盘没有意义，
+    // 而且那次写盘还会触发一次宿主重载（画布已经没了，纯浪费）
+    if (gridPersistTimer) {
+      window.clearTimeout(gridPersistTimer)
+      gridPersistTimer = 0
+    }
   })
 
   watch(
@@ -1766,6 +2031,7 @@ export function useCanvasEditor(
       inspectorSectionState,
       addNode,
       addNodeAtPosition,
+      insertCanvasFileNode,
       createEdgeFromSelection,
       deleteSelection,
       activateNode,
@@ -1793,6 +2059,8 @@ export function useCanvasEditor(
       colorThemes: CANVAS_COLOR_THEMES,
       currentColorStyles,
       setColorTheme,
+      gridSettings,
+      setCanvasGridSettings,
       selectionLayoutActions,
       selectionToolbar,
       selectionToolbarPopover,

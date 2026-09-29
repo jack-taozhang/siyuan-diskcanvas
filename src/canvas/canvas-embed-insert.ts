@@ -147,7 +147,7 @@ export async function insertCanvasEmbed(options: InsertCanvasEmbedOptions): Prom
 
   const embedTitle = title || canvasTitleFromPath(canvasPath)
   const markdown = buildCanvasEmbedBlockMarkdown(
-    pluginName || "siyuan-diskcanvas-next",
+    pluginName || "siyuan-diskcanvas",
     { path: canvasPath, title: embedTitle },
   )
 

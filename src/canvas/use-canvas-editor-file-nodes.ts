@@ -334,7 +334,8 @@ function extractImageSourceFromPreviewHtml(previewHtml: string): string | undefi
         return base as typeof base & { thumbnail?: CanvasFileTargetPreview['thumbnail'] }
       }
 
-      await client.login()
+      // `login` 在接口里是可选的：契约适配器不需要登录（登录归网盘侧）
+      await client.login?.()
       const stat = await client.stat(target.mount, target.nebulaPath)
       const detail = `${target.mount}${target.nebulaPath}${stat && typeof stat.size === 'number'
         ? `  ·  ${formatSize(stat.size)}`

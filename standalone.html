@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="same-origin" />
+    <!--
+      独立网页编辑器外壳。
+      ==========================================================================
+      由画布工具栏「在独立网页中打开」按钮生成
+      （`/plugins/<插件名>/standalone.html?path=<编码后的画布路径>`）。
+
+      ★ 这里刻意保持"空壳" ★
+        真正的样式、主题、设置、能力桥全部在 `src/standalone.ts` 里运行时准备 ——
+        原因是它们都得**先问内核**才知道（思源版本号、当前主题名、样式表哈希、
+        界面语言、设置文件内容）。写死在 HTML 里必然漂移。
+
+      ★ 为什么只引一个模块脚本 ★
+        Vite 会把 `src/standalone.ts` 连同它整条依赖链（App.vue →
+        CanvasWorkspace.vue → …）打包成 `standalone.js`，
+        与思源页签渲染**同一份组件源码** —— 这是"渲染效果一样"的根本保证。
+
+      ★ `#app` 就是画布宿主 ★
+        `standalone.ts` 会给它加上绝对定位铺满视口的关键样式；
+        那一小段样式必须在思源 base.css 之后生效，所以是运行时注入到 head 末尾的。
+    -->
+    <title>DiskCanvas</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/standalone.ts"></script>
+  </body>
+</html>

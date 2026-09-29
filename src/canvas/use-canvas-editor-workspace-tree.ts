@@ -176,7 +176,7 @@ export function createCanvasEditorWorkspaceTree(deps: WorkspaceTreeDependencies)
   }
 
   async function createWorkspaceCanvas(targetDir?: unknown): Promise<string | null> {
-    const defaultDir = deps.getSettings().defaultCanvasDirectory || "/data/storage/petal/siyuan-diskcanvas-next"
+    const defaultDir = deps.getSettings().defaultCanvasDirectory || "/data/storage/petal/siyuan-diskcanvas"
     let directory = defaultDir
     if (typeof targetDir === "string" && targetDir.trim()) {
       const trimmed = targetDir.trim()

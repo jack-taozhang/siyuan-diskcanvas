@@ -3,33 +3,16 @@
     class="file-card"
     :title="tooltip"
   >
-    <div
-      v-if="preview.kind === 'canvas' && preview.thumbnail"
-      class="file-card__canvas-preview"
-    >
-      <svg
-        class="file-card__thumbnail"
-        :viewBox="canvasThumbnailViewBox"
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <path
-          v-for="(edge, edgeIndex) in preview.thumbnail.edges || []"
-          :key="`thumbnail-edge-${node.id}-${edgeIndex}`"
-          class="file-card__thumbnail-edge"
-          :d="`M ${edge.fromX} ${edge.fromY} L ${edge.toX} ${edge.toY}`"
-        />
-        <rect
-          v-for="(thumbnailNode, thumbnailIndex) in preview.thumbnail.nodes || []"
-          :key="`thumbnail-node-${node.id}-${thumbnailIndex}`"
-          class="file-card__thumbnail-node"
-          rx="16"
-          :height="thumbnailNode.height"
-          :width="thumbnailNode.width"
-          :x="thumbnailNode.x"
-          :y="thumbnailNode.y"
-        />
-      </svg>
-    </div>
+    <!--
+      ★ 画布卡片的缩略图预览已移除（第 33 轮，用户指定）★
+
+      用户原话：「画布插入块的样式 参照 网盘文件的样式。顶部 标题 改为 画布文件，
+      下面是文件名称，然后是路径。后面就没有了。删除现在的预览。和 open nested canvas.」
+
+      所以这里**不再渲染** `.file-card__canvas-preview`（SVG 节点/连线缩略图）。
+      `preview.thumbnail` 的数据通路仍然保留（`loadCanvasTargetPreview` 照旧解析），
+      只是不再消费 —— 将来若要恢复预览，把这段 JSX 加回来即可。
+    -->
     <img
       v-if="imageSrc"
       :src="imageSrc"
@@ -41,10 +24,28 @@
       v-if="showHeadline"
       class="canvas-node__title"
     >
-      {{ preview.headline }}
+      {{ displayHeadline }}
+    </div>
+    <!--
+      ★ 画布卡片正文（第 35 轮：与网盘卡片同构）★
+      第 1 行 = 文件名（**粗体**，与网盘卡片的文件名同一处观感）
+      第 2 行 = 完整路径（灰色小字）
+      两行同属一块信息 ⇒ 用 `.file-card__canvas-name` 收掉行间距，只隔 2px。
+    -->
+    <div
+      v-if="isCanvasPreview && preview.detail"
+      class="canvas-node__title file-card__canvas-name"
+    >
+      {{ preview.detail }}
     </div>
     <div
-      v-if="showDetail"
+      v-if="isCanvasPreview && preview.pathLine"
+      class="canvas-node__meta file-card__path-line"
+    >
+      {{ preview.pathLine }}
+    </div>
+    <div
+      v-if="!isCanvasPreview && showDetail"
       class="canvas-node__meta"
     >
       {{ preview.detail }}
@@ -66,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUpdated, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
 import type { CanvasFileTargetPreview } from '@/canvas/file-target-preview'
 import { triggerNativeProtyleRender } from '@/canvas/protyle-native-render'
 import type { CanvasFileNode } from '@/canvas/types'
@@ -80,6 +81,13 @@ const props = withDefaults(defineProps<{
   showDetail: boolean
   showHelper?: boolean
   showHeadline: boolean
+  /**
+   * 「画布文件」这个固定标题的**本地化文案**。
+   *
+   * 组件里不 import i18n（与 CanvasFileManagerDialog 的 `t` prop 同一约定），
+   * 由父组件注入；父组件没给时退回 preview 里的英文兜底常量。
+   */
+  canvasHeadline?: string
   tooltip?: string
 }>(), {
   showHelper: true,
@@ -91,6 +99,20 @@ const emit = defineEmits<{
 }>()
 
 const documentPreviewRef = ref<HTMLElement | null>(null)
+
+const isCanvasPreview = computed(() => props.preview.kind === 'canvas')
+
+/**
+ * 正文第一行的标题文案。
+ *
+ * ★ 第 35 轮：画布卡片**不再**在这里显示「画布文件」★
+ *   那个固定标题已经移到**卡片抬头**（`CanvasWorkspace.getNodeHeaderTitle`
+ *   的 `canvas` 分支），因为抬头才是"这是什么"的位置，与网盘卡片一致。
+ *   这里对画布卡片保留通用语义 —— 显示 `preview.headline`（= 文件名），
+ *   作为父组件未把 `showHeadline` 置为 false 时的兜底；正常情况下
+ *   画布卡片的这一行由下面的 `.file-card__canvas-name` 承担，不会再重复渲染。
+ */
+const displayHeadline = computed(() => props.preview.headline)
 
 function scheduleNativeRender() {
   void nextTick(() => {
@@ -122,11 +144,6 @@ watch(() => props.documentPreviewHtml, () => {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.file-card:has(.file-card__canvas-preview) {
-  height: 100%;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
 .file-card:has(.file-card__document-preview) {
   height: 100%;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -154,35 +171,13 @@ watch(() => props.documentPreviewHtml, () => {
   background: var(--canvas-surface);
 }
 
-.file-card__canvas-preview {
-  height: 100%;
-  min-height: 132px;
-  overflow: hidden;
-  border-radius: 12px;
-  border: 1px solid var(--canvas-border);
-  background:
-    linear-gradient(180deg, rgba(53, 103, 214, 0.08), rgba(15, 23, 42, 0.02)),
-    var(--canvas-surface);
-}
-
-.file-card__thumbnail {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.file-card__thumbnail-edge {
-  fill: none;
-  stroke: rgba(53, 103, 214, 0.58);
-  stroke-linecap: round;
-  stroke-width: 10px;
-}
-
-.file-card__thumbnail-node {
-  fill: rgba(255, 255, 255, 0.88);
-  stroke: rgba(15, 23, 42, 0.12);
-  stroke-width: 4px;
-}
+/*
+ * ★ 画布卡片的缩略图样式已随模板一并删除（第 33 轮）★
+ *   `.file-card__canvas-preview` / `.file-card__thumbnail*` 三条规则此前只服务于
+ *   那段 SVG 预览；组件不再渲染它，规则留着就是死代码。
+ *   同时删掉 `.file-card:has(.file-card__canvas-preview)` 那条网格规则 ——
+ *   否则画布卡片会被套上 `height: 100%`，内容只有三行时被撑出一大片空白。
+ */
 
 .file-card__document-preview {
   margin-top: 2px;
@@ -206,6 +201,30 @@ watch(() => props.documentPreviewHtml, () => {
   font-size: 12px;
   color: var(--canvas-text-muted);
   word-break: break-all;
+}
+
+/*
+ * 画布卡片的**文件名行**（正文第一行）。
+ *
+ * ★ 为什么复用 `.canvas-node__title` 还要加这个类（第 35 轮）★
+ *   复用 `.canvas-node__title` 是为了拿到与网盘卡片文件名**完全一致**的
+ *   粗体/字号/行高；加这个类只为收掉"标题 → 正文"那段 `margin-top: 8px`：
+ *   它下面紧跟的是同一张文件的路径，两行属于同一块信息，隔 8px 会被读成
+ *   两个不相干的区块（网盘卡片那里 detail 就是路径、本来就只有一行，没这个问题）。
+ */
+.file-card__canvas-name {
+  margin-top: 0;
+}
+
+/*
+ * 画布卡片的路径行：紧跟在文件名下面，视觉上属于同一块信息。
+ * `.canvas-node__meta` 本身带 `margin-top: 8px`（那是给"标题 → 正文"的间距），
+ * 这两行之间只需要 2px —— 否则会被读成两个不相干的信息块。
+ */
+.file-card__path-line {
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 .markdown-preview {

@@ -111,7 +111,7 @@
             <button
               v-for="entry in visibleEntries"
               :key="entry.path"
-              :class="['canvas-node-picker__option canvas-nebula__entry', { 'canvas-nebula__entry--selected': selectedPath === entry.path }]"
+              :class="['canvas-node-picker__option canvas-nebula__entry', { 'canvas-nebula__entry--selected': selectedEntry?.path === entry.path }]"
               type="button"
               :data-testid="`nebula-picker-entry-${entry.isDir ? 'dir' : 'file'}`"
               :title="entry.path"
@@ -417,7 +417,8 @@ onMounted(() => {
 .canvas-dialog-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  /* 必须高于 `.canvas-toolbar`（z-index: 10），否则模态框顶部被工具栏盖住 */
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -112,7 +112,7 @@ export async function openCanvasEditorTab(
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(
-      `[siyuan-diskcanvas-next] openTab failed (customModelType=${customModelType}):`,
+      `[siyuan-diskcanvas] openTab failed (customModelType=${customModelType}):`,
       error,
     )
     throw error
@@ -193,7 +193,7 @@ export function registerCanvasEditorTab(plugin: Plugin, tabType = CANVAS_EDITOR_
       } catch (error) {
         // 把被宿主吞掉的异常显式暴露出来：既写 console，也渲染到面板上。
         // eslint-disable-next-line no-console
-        console.error("[siyuan-diskcanvas-next] canvas tab init failed:", error)
+        console.error("[siyuan-diskcanvas] canvas tab init failed:", error)
         renderCanvasTabFailure(host, error)
       }
     },
@@ -202,7 +202,7 @@ export function registerCanvasEditorTab(plugin: Plugin, tabType = CANVAS_EDITOR_
         unmountCanvasApp(this.element as HTMLElement)
       } catch (error) {
         // eslint-disable-next-line no-console
-        console.error("[siyuan-diskcanvas-next] canvas tab destroy failed:", error)
+        console.error("[siyuan-diskcanvas] canvas tab destroy failed:", error)
       }
     },
   })

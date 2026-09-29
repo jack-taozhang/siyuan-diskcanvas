@@ -1,8 +1,8 @@
 {
-  "name": "siyuan-diskcanvas-next",
+  "name": "siyuan-diskcanvas",
   "author": "zhangtao",
-  "url": "https://github.com/jack-taozhang/siyuan-diskcanvas-next",
-  "version": "0.2.4",
+  "url": "https://github.com/jack-taozhang/siyuan-diskcanvas",
+  "version": "0.2.20",
   "minAppVersion": "2.10.14",
   "disabledInPublish": true,
   "backends": [

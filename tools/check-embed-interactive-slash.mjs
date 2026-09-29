@@ -103,10 +103,22 @@ check(
 //   而嵌入块里工具栏是可见的 ⇒ 不在这里拦，用户就能点「+」「撤销」改动画布。
 //   39 处 commitDocument 调用覆盖工具栏/快捷键/拖拽/连线/拖放/右键菜单，
 //   在此一点加守卫即可，不必逐个 action 加（逐个加必漏）。
+/* ★★★ 断言的是**具名能力**，不是某个布尔变量 ★★★
+ *
+ *   本文件的这几项原本 grep 的是 `readonly.value` / `isEmbedMode`。
+ *   而画布后来把「只读」重构成了**能力矩阵**（canvas-interaction-policy.ts）：
+ *   守卫一律改查 `capabilities.value.<具名能力>`，
+ *   于是旧正则全部失配 —— 检查器变成**永远失败**，等于这条防线没了
+ *   （更糟：真出回归时也分不清是"老失败"还是"新回归"）。
+ *
+ *   现在按**能力名**断言。这比按变量名断言更有意义：
+ *   能力名直接表达"这里在保护什么" —— 例如写盘守卫必须是 `persist`
+ *   （只受 embed 影响，冲突态要能保存），而不是笼统的 `editDocument`。
+ */
 check(
   "★ commitDocument 有只读守卫（覆盖全部 39 个编辑入口）",
-  /function commitDocument\([\s\S]{0,1200}?if \(readonly\.value\)\s*\{\s*return/.test(editor),
-  "工具栏按钮、快捷键、手势最终都汇到这里",
+  /function commitDocument\([\s\S]{0,1600}?if \(!capabilities\.value\.editDocument\)\s*\{\s*return/.test(editor),
+  "工具栏按钮、快捷键、手势最终都汇到这里；守卫查 capabilities.editDocument",
 )
 check(
   "★ 反向断言：加载路径不经过 commitDocument（故守卫不会挡住加载）",
@@ -136,7 +148,8 @@ check(
 // ── 画布区域不得打开/跳转页签 ──
 check(
   "★ activateNode 在嵌入模式下早退（画布区域唯一的打开入口被收口）",
-  /async function activateNode\(node: CanvasNode\)\s*\{[\s\S]{0,900}?if \(isEmbedMode\)\s*\{\s*return false/.test(editor),
+  /async function activateNode\(node: CanvasNode\)\s*\{[\s\S]{0,1400}?if \(!capabilities\.value\.openNodeTab\)\s*\{\s*return false/.test(editor),
+  "判据用 capabilities.openNodeTab（只受 embed 影响；冲突态/移动端仍可打开）",
 )
 check(
   "★ 反向断言：activateNode 全项目只有一个调用点（故收口一点即可覆盖）",
@@ -149,7 +162,8 @@ check(
 )
 check(
   "只读下舞台双击不再新建节点（避免选中幽灵 id）",
-  /function handleStageDoubleClick\(event: MouseEvent\)\s*\{[\s\S]{0,700}?if \(editor\.readonly\)\s*\{\s*return/.test(workspace),
+  /function handleStageDoubleClick\(event: MouseEvent\)\s*\{[\s\S]{0,1200}?if \(!editor\.capabilities\.createByDoubleClick\)\s*\{\s*return/.test(workspace),
+  "判据用 capabilities.createByDoubleClick",
 )
 
 // ── 纯画布观感：隐藏顶部工具栏 ──
@@ -190,12 +204,22 @@ const saveBody = functionBody(editor, "async function save()")
 const silentSaveBody = functionBody(editor, "async function silentSave()")
 check(
   "★ save() 在嵌入模式下直接 return（同一条 .canvas 被页签实例打开时不许双写）",
-  /isEmbedMode/.test(saveBody),
+  /if \(!capabilities\.value\.persist\)\s*\{\s*return/.test(saveBody),
   saveBody ? saveBody.slice(0, 60).replace(/\s+/g, " ") + " …" : "(未取到函数体)",
 )
 check(
   "★ silentSave() 同样有嵌入守卫",
-  /isEmbedMode/.test(silentSaveBody),
+  /if \(!capabilities\.value\.persist\)\s*\{\s*return/.test(silentSaveBody),
+)
+/**
+ * ★ 反向断言：写盘守卫必须是 `persist`，**不能**写成 `editDocument` ★
+ *   `capabilities.editDocument` 把所有只读来源都算进去（含**冲突态**）。
+ *   用它来挡保存 = 文档冲突时用户既改不了也存不了 ⇒ 直接把出口堵死。
+ *   见 canvas-interaction-policy.ts 的「两条容易搞错的边界」。
+ */
+check(
+  "★ 反向断言：写盘守卫用 persist 而非 editDocument（冲突态必须仍能保存）",
+  !/if \(!capabilities\.value\.editDocument\)\s*\{\s*return/.test(saveBody),
 )
 
 // ── 挂载机制 ──

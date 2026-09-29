@@ -25,6 +25,16 @@ export interface CanvasFileTargetPreview {
   imageSrc?: string
   kind: "block" | "canvas" | "document" | "file" | "image"
   previewHtml?: string
+  /**
+   * ★ 路径行（第 33 轮为"画布文件卡片"新增）★
+   *
+   * 画布卡片要显示**两行**：文件名 + 完整路径。
+   * 原来只有 `headline`（标题）与 `detail` 两个槽位，而这张卡片的
+   * `detail` 要给文件名用 —— 于是路径单独占一个字段，由卡片按顺序渲染。
+   *
+   * 只对 `kind: "canvas"` 有意义；其他类型不设，卡片也不会渲染这一行。
+   */
+  pathLine?: string
   thumbnail?: {
     edges: CanvasThumbnailEdge[]
     nodes: CanvasThumbnailNode[]
@@ -103,6 +113,23 @@ function getFileBadge(target: PreviewInput): string {
   return 'FILE'
 }
 
+/**
+ * 取路径末段（文件名）。
+ *
+ * ★ 与 `getFileBadge` 同一套切分规则 ★
+ *   路径里可能有查询串/锚点（`x.canvas?v=1`），也可能有反斜杠；
+ *   两处若各写一套，徽标与文件名就可能对不上。抽出来共用。
+ */
+function getFileName(path: unknown): string {
+  const raw = typeof path === 'string' ? path : ''
+  if (!raw) {
+    return ''
+  }
+  const cleanPath = raw.split(/[?#]/)[0]
+  const segments = cleanPath.split(/[/\\]/)
+  return segments[segments.length - 1] || raw
+}
+
 export function createCanvasFileTargetPreview(target: PreviewInput): CanvasFileTargetPreview {
   switch (target.kind) {
     case 'block':
@@ -127,13 +154,30 @@ export function createCanvasFileTargetPreview(target: PreviewInput): CanvasFileT
         previewHtml: target.excerptHtml || '',
       }
     case 'canvas':
+      /**
+       * ★ 画布卡片与网盘卡片同构（第 33 轮初版 → 第 35 轮修正）★
+       *
+       * 第 33 轮的分配是「headline = 画布文件 / detail = 文件名 / pathLine = 路径」，
+       * 导致正文渲染成**三行**（类型名 + 文件名 + 路径），而抬头又显示文件名 ——
+       * 与网盘卡片（抬头 = 类型名，正文 = 文件名 + 路径，两行）风格明显不一致。
+       * 用户第 35 轮反馈：「网盘文库 和 画布 文件 块的 风格不一样。需要调整 画布文件块。」
+       *
+       * 现在与网盘卡片**完全同构**：
+       *   header    = 「画布文件」（类型名，由 CanvasWorkspace.getNodeHeaderTitle 出，带 i18n）
+       *   detail    = 文件名（正文第一行，粗体 —— 与网盘卡片的文件名同一处样式）
+       *   pathLine  = 完整路径（正文第二行，灰色小字）
+       *   helper    = ''（不显示）
+       *
+       * ⇒ headline 不再承担"画布文件"这个固定标题：那是**抬头**的职责。
+       *   这里给文件名，作为「抬头解析未完成」时的兜底，语义也对得上。
+       */
       return {
         badge: 'Canvas',
-        detail: target.path,
-        headline: target.title,
-        helper: 'Opens nested canvas',
+        detail: getFileName(target.path),
+        headline: getFileName(target.path) || 'Canvas file',
+        helper: '',
         kind: 'canvas',
-        thumbnail: target.thumbnail,
+        pathLine: target.path,
       }
     case 'image':
       return {

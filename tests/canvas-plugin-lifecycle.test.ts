@@ -118,7 +118,7 @@ class PluginMock {
   }
   public i18n?: Record<string, string>
   public icons: string[] = []
-  public name = "siyuan-diskcanvas-next"
+  public name = "siyuan-diskcanvas"
   public setting: unknown
   public tabs: any[] = []
   public topBars: any[] = []
@@ -430,7 +430,7 @@ describe("canvas plugin lifecycle", () => {
     // 新实现（2026-09-28）：不再上传 SVG 资源，改为插入 ;;;<插件名>/canvas 自定义块
     expect(fetchMock).not.toHaveBeenCalledWith("/api/asset/upload", expect.anything())
     expect(fetchSyncPost).toHaveBeenCalledWith("/api/block/appendBlock", expect.objectContaining({
-      data: `;;;siyuan-diskcanvas-next/canvas\n{"path":"/data/storage/petal/siyuan-canvas/大三元1.canvas","title":"大三元1"}\n;;;\n`,
+      data: `;;;siyuan-diskcanvas/canvas\n{"path":"/data/storage/petal/siyuan-canvas/大三元1.canvas","title":"大三元1"}\n;;;\n`,
       dataType: "markdown",
       parentID: "20260608194800-docid",
     }))
@@ -698,7 +698,7 @@ describe("canvas plugin lifecycle", () => {
 
     const setting = plugin.setting as SettingMock
     expect(setting.options).toEqual({ width: "620px" })
-    expect(setting.open).toHaveBeenCalledWith("siyuan-diskcanvas-next")
+    expect(setting.open).toHaveBeenCalledWith("siyuan-diskcanvas")
 
     // 设置项顺序对齐当前面板：① 画布基础 ② 显示
     // ★ 第 13/15 轮：画布**不再**单独配置网盘 ⇒ 原来的「网盘连接」组整块删除，
@@ -712,7 +712,7 @@ describe("canvas plugin lifecycle", () => {
     const showDragAlignmentGuidesInput = setting.items[8].createActionElement() as HTMLInputElement
 
     expect(colorThemeSelect.value).toBe("classic")
-    expect(defaultDirectoryInput.value).toBe("/data/storage/petal/siyuan-diskcanvas-next")
+    expect(defaultDirectoryInput.value).toBe("/data/storage/petal/siyuan-diskcanvas")
     expect(recentFilesLimitInput.value).toBe("8")
     expect(detectExternalChangesInput.checked).toBe(true)
     expect(showCanvasThumbnailsInput.checked).toBe(false)
@@ -737,7 +737,7 @@ describe("canvas plugin lifecycle", () => {
 
     expect(plugin.getCanvasSettings()).toEqual(expect.objectContaining({
       colorTheme: "classic",
-      defaultCanvasDirectory: "/data/storage/petal/siyuan-diskcanvas-next",
+      defaultCanvasDirectory: "/data/storage/petal/siyuan-diskcanvas",
       detectExternalChanges: false,
       enableDebugLog: false,
       noteCreationDirectory: "",
@@ -780,7 +780,7 @@ describe("canvas plugin lifecycle", () => {
 
     expect(plugin.getCanvasSettings()).toEqual(expect.objectContaining({
       colorTheme: "classic",
-      defaultCanvasDirectory: "/data/storage/petal/siyuan-diskcanvas-next",
+      defaultCanvasDirectory: "/data/storage/petal/siyuan-diskcanvas",
       detectExternalChanges: false,
       enableDebugLog: false,
       noteCreationDirectory: "",
@@ -944,7 +944,7 @@ describe("canvas plugin lifecycle", () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(fetchSyncPost).toHaveBeenCalledWith("/api/block/insertBlock", expect.objectContaining({
-      data: `;;;siyuan-diskcanvas-next/canvas\n{"path":"/data/storage/siyuan-canvas/slash-demo.canvas","title":"slash-demo"}\n;;;\n`,
+      data: `;;;siyuan-diskcanvas/canvas\n{"path":"/data/storage/siyuan-canvas/slash-demo.canvas","title":"slash-demo"}\n;;;\n`,
       dataType: "markdown",
       nextID: "slash-block-1",
       parentID: "doc-slash-test",

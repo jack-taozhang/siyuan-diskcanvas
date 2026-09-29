@@ -1,9 +1,14 @@
 import type { CanvasColorThemeId } from "@/canvas/canvas-color-themes"
 import { DEFAULT_COLOR_THEME } from "@/canvas/canvas-color-themes"
+import type { CanvasGridSettings } from "@/canvas/grid"
+import {
+  DEFAULT_CANVAS_GRID_SETTINGS,
+  normalizeCanvasGridSettings,
+} from "@/canvas/grid"
 
 export type CanvasRecentFileSource = "local" | "workspace"
 
-export const CANVAS_DEFAULT_DIRECTORY = "/data/storage/petal/siyuan-diskcanvas-next"
+export const CANVAS_DEFAULT_DIRECTORY = "/data/storage/petal/siyuan-diskcanvas"
 
 /**
  * 网盘连接配置。
@@ -41,6 +46,15 @@ export interface CanvasPluginSettings {
   showCanvasThumbnails: boolean
   showNodeHeader: boolean
   autoCreateTextCardOnDrag: boolean
+  /**
+   * 网格线（样式 / 间距 / 吸附）。
+   *
+   * 为什么是一个子对象而不是三个扁平字段：这三项**永远一起用**
+   * （画网格 + 吸网格是同一件事的两面），
+   * 而且它们有一份共用的归一化逻辑 `normalizeCanvasGridSettings`，
+   * 收在一个对象里就不会出现"样式合法但间距是 NaN"这种半脏状态。
+   */
+  grid: CanvasGridSettings
   nebula: NebulaSettings
 }
 
@@ -136,6 +150,7 @@ export function createDefaultCanvasPluginSettings(): CanvasPluginSettings {
     defaultCanvasDirectory: CANVAS_DEFAULT_DIRECTORY,
     detectExternalChanges: true,
     enableDebugLog: false,
+    grid: { ...DEFAULT_CANVAS_GRID_SETTINGS },
     nebula: createDefaultNebulaSettings(),
     noteCreationDirectory: "",
     recentFilesLimit: 8,
@@ -263,6 +278,8 @@ export function normalizeCanvasPluginData(value: unknown): CanvasPluginData {
     showNodeHeader: typeof candidate.settings?.showNodeHeader === "boolean"
       ? candidate.settings.showNodeHeader
       : defaults.settings.showNodeHeader,
+    // 网格：整体交给 grid.ts 的归一化器（它负责合法样式、间距夹取与小数处理）
+    grid: normalizeCanvasGridSettings(candidate.settings?.grid),
   }
 
   const inspectorDefaults = defaults.ui.inspectorSections

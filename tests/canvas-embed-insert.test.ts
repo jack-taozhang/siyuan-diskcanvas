@@ -141,7 +141,7 @@ describe("canvas-embed-insert", () => {
        */
       expect(insertBlockMock).toHaveBeenCalledWith(
         "markdown",
-        expect.stringMatching(/^;;;siyuan-diskcanvas-next\/canvas\n/),
+        expect.stringMatching(/^;;;siyuan-diskcanvas\/canvas\n/),
         "cursor-block-789",
         undefined,
         "doc-123",

@@ -3,6 +3,14 @@ import type { CanvasPluginSettings } from "@/canvas/plugin-data"
 import type { CanvasI18nTranslator } from "@/canvas/use-canvas-editor-shared"
 
 import { CANVAS_COLOR_THEMES } from "@/canvas/canvas-color-themes"
+import {
+  CANVAS_GRID_SIZE_MAX,
+  CANVAS_GRID_SIZE_MIN,
+  CANVAS_GRID_SIZE_PRESETS,
+  CANVAS_GRID_STYLES,
+  clampCanvasGridSize,
+  type CanvasGridStyle,
+} from "@/canvas/grid"
 import { guessNebulaBaseUrl } from "@/canvas/plugin-data"
 
 /**
@@ -27,7 +35,7 @@ export interface CanvasPluginSettingsPanelOptions {
   t: CanvasI18nTranslator
 }
 
-const STYLE_ID = "siyuan-diskcanvas-next-settings-styles"
+const STYLE_ID = "siyuan-diskcanvas-settings-styles"
 
 function injectSettingsPanelStyles(): void {
   if (document.getElementById(STYLE_ID)) {
@@ -74,6 +82,15 @@ function injectSettingsPanelStyles(): void {
     }
   `
   document.head.appendChild(style)
+}
+
+/** 网格样式 → i18n 键（`Record<具体键名>` 保证新增样式必然补文案） */
+const GRID_STYLE_I18N_KEYS: Record<CanvasGridStyle, "gridStyleDots" | "gridStyleGrid" | "gridStyleHlines" | "gridStyleNone" | "gridStyleVlines"> = {
+  dots: "gridStyleDots",
+  grid: "gridStyleGrid",
+  hlines: "gridStyleHlines",
+  none: "gridStyleNone",
+  vlines: "gridStyleVlines",
 }
 
 /** 简单文本输入项 */
@@ -130,6 +147,50 @@ function switchItem(
   })
 }
 
+/**
+ * 下拉选择项。
+ *
+ * 与 `textItem` / `switchItem` 同一风格（都是 `setting.addItem` + 自造元素），
+ * 因为思源 `Setting` 的三个便捷方法（addText/addSwitch/addSelect）在**同一份面板里
+ * 混用**时排布不一致 —— 现成的 `addSelect` 不带 `data-setting-key`，
+ * 插件自己的 CSS 就管不到它的宽度，四行选项会宽窄不一。
+ *
+ * @param options.value 选项值
+ * @param options.options 选项列表（**必须包含当前值**，否则下拉会显示成第一项，
+ *        用户一打开设置就"被改掉"了）
+ * @param options.label 选项显示文案
+ */
+function selectItem(
+  setting: Setting,
+  opts: {
+    title: string
+    description?: string
+    value: string
+    options: Array<{ label: string, value: string }>
+    onChange: (v: string) => void
+  },
+): void {
+  setting.addItem({
+    createActionElement: () => {
+      const select = document.createElement("select")
+      select.className = "b3-select fn__flex-center"
+      select.setAttribute("data-setting-key", opts.title)
+      select.style.width = "200px"
+      for (const option of opts.options) {
+        const el = document.createElement("option")
+        el.value = option.value
+        el.textContent = option.label
+        el.selected = option.value === opts.value
+        select.appendChild(el)
+      }
+      select.addEventListener("change", () => opts.onChange(select.value))
+      return select
+    },
+    description: opts.description,
+    title: opts.title,
+  })
+}
+
 export function openCanvasPluginSettingsPanel(options: CanvasPluginSettingsPanelOptions): Setting {
   const {
     createSetting,
@@ -158,7 +219,7 @@ export function openCanvasPluginSettingsPanel(options: CanvasPluginSettingsPanel
   textItem(setting, {
     description: t("settingsDefaultCanvasDirectoryDescription") || "新建画布文件的存放目录",
     onChange: async (v) => {
-      draft.defaultCanvasDirectory = v.trim() || "/data/storage/petal/siyuan-diskcanvas-next"
+      draft.defaultCanvasDirectory = v.trim() || "/data/storage/petal/siyuan-diskcanvas"
       await saveDraft()
     },
     title: t("settingsDefaultCanvasDirectoryTitle") || "默认画布目录",
@@ -270,6 +331,60 @@ export function openCanvasPluginSettingsPanel(options: CanvasPluginSettingsPanel
     },
     title: t("settingsShowDragAlignmentGuidesTitle") || "对齐辅助线",
     value: draft.showDragAlignmentGuides,
+  })
+
+  /* ── 网格线 ──
+   *
+   * 工具栏那个弹层与这里是**两条入口、同一份设置**：
+   * 弹层给"顺手改一下"，面板给"找得到、看得全"。
+   * 两边的合法值都来自 `canvas/grid.ts`（样式清单 / 间距预设 / 夹取范围），
+   * 不各写一份 —— 否则面板里能选出工具栏画不出来的值。
+   */
+  selectItem(setting, {
+    description: t("settingsGridStyleDescription") || "画布背景网格的类型（不显示 / 点阵 / 方格 / 横线 / 纵线）",
+    onChange: async (v) => {
+      draft.grid = { ...draft.grid, style: v as CanvasGridStyle }
+      await saveDraft()
+    },
+    options: CANVAS_GRID_STYLES.map(style => ({
+      label: t(GRID_STYLE_I18N_KEYS[style]),
+      value: style,
+    })),
+    title: t("settingsGridStyleTitle") || "网格样式",
+    value: draft.grid.style,
+  })
+
+  /**
+   * 间距用"预设 + 当前值"合成选项表。
+   *
+   * ★ 为什么必须把当前值也并进去 ★
+   *   设置文件是可手改的（petal 是明文 JSON），旧版本也可能留下非预设值
+   *   （例如 20）。若选项里没有 20，浏览器会把 select 落到第一项
+   *   （16）——用户只要打开设置面板看一眼，值就被**悄悄改掉**了。
+   */
+  const gridSizeOptions = Array.from(new Set([
+    ...CANVAS_GRID_SIZE_PRESETS,
+    clampCanvasGridSize(draft.grid.size),
+  ])).sort((a, b) => a - b)
+  selectItem(setting, {
+    // 范围由常量拼进来：改 `grid.ts` 里的上下限，文案自动跟着变
+    description: `${t("settingsGridSizeDescription")}（${CANVAS_GRID_SIZE_MIN}–${CANVAS_GRID_SIZE_MAX}px）`,
+    onChange: async (v) => {
+      draft.grid = { ...draft.grid, size: clampCanvasGridSize(Number(v)) }
+      await saveDraft()
+    },
+    options: gridSizeOptions.map(size => ({ label: `${size}px`, value: String(size) })),
+    title: t("settingsGridSizeTitle") || "网格间距",
+    value: String(draft.grid.size),
+  })
+  switchItem(setting, {
+    description: t("settingsGridSnapDescription") || "拖动卡片或新建卡片时，落点自动对齐到网格线",
+    onChange: async (v) => {
+      draft.grid = { ...draft.grid, snap: v }
+      await saveDraft()
+    },
+    title: t("settingsGridSnapTitle") || "吸附到网格",
+    value: draft.grid.snap,
   })
 
   switchItem(setting, {

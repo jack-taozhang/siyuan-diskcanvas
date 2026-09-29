@@ -13,6 +13,8 @@ import {
 } from 'vue'
 
 import { createCanvasEditorGestureHandlers } from '@/canvas/use-canvas-editor-gestures'
+import type { CanvasGridSettings } from '@/canvas/grid'
+import { DEFAULT_CANVAS_GRID_SETTINGS } from '@/canvas/grid'
 import { resolveCanvasInteractionPolicy } from '@/canvas/canvas-interaction-policy'
 import type { CanvasNode } from '@/canvas/types'
 
@@ -36,7 +38,11 @@ function capsFor(readonly: boolean) {
 function createGestureHarness(
   nodes: CanvasNode[],
   selectedNodeIds: string[] = [],
-  options: { showDragAlignmentGuides?: boolean, autoCreateTextCardOnDrag?: boolean } = {},
+  options: {
+    showDragAlignmentGuides?: boolean
+    autoCreateTextCardOnDrag?: boolean
+    grid?: Partial<CanvasGridSettings>
+  } = {},
 ) {
   const stage = document.createElement('div')
   const viewport = { scale: 1, x: 0, y: 0 }
@@ -46,6 +52,11 @@ function createGestureHarness(
   }
   const showDragAlignmentGuides = ref(options.showDragAlignmentGuides ?? true)
   const autoCreateTextCardOnDrag = ref(options.autoCreateTextCardOnDrag ?? false)
+  /**
+   * 网格设置。默认取 `DEFAULT_CANVAS_GRID_SETTINGS`（吸附关闭）——
+   * 从真实常量派生，将来默认值变了这里自动跟上，不会静默用一份写死的假值。
+   */
+  const gridSettings = ref<CanvasGridSettings>({ ...DEFAULT_CANVAS_GRID_SETTINGS, ...options.grid })
   const connectionDraft = reactive({
     fromNodeId: '',
     fromSide: 'left' as const,
@@ -93,6 +104,7 @@ function createGestureHarness(
     viewport,
     showDragAlignmentGuides: computed(() => showDragAlignmentGuides.value),
     autoCreateTextCardOnDrag: computed(() => autoCreateTextCardOnDrag.value),
+    gridSettings,
     showNodeHeader: computed(() => false),
   })
 
@@ -311,6 +323,8 @@ describe('canvas editor gesture handlers', () => {
         selectionBox: {} as any,
         selectedEdge: computed(() => null),
         showDragAlignmentGuides: computed(() => true),
+      gridSettings: ref({ ...DEFAULT_CANVAS_GRID_SETTINGS }),
+        gridSettings: ref({ ...DEFAULT_CANVAS_GRID_SETTINGS }),
         stageRef: ref(stage),
         state: {
           document: {
@@ -398,6 +412,7 @@ describe('canvas editor gesture handlers', () => {
       selectionBox: {} as any,
       selectedEdge: computed(() => null),
       showDragAlignmentGuides: computed(() => true),
+      gridSettings: ref({ ...DEFAULT_CANVAS_GRID_SETTINGS }),
       stageRef: ref(stage),
       state: {
         document: {
@@ -456,6 +471,7 @@ describe('canvas editor gesture handlers', () => {
       selectionBox: {} as any,
       selectedEdge: computed(() => null),
       showDragAlignmentGuides: computed(() => true),
+      gridSettings: ref({ ...DEFAULT_CANVAS_GRID_SETTINGS }),
       stageRef: ref(stage),
       state: {
         document: {
@@ -689,6 +705,144 @@ describe('canvas editor gesture handlers', () => {
     expect(alignmentGuides.guides).toEqual([])
   })
 
+  /**
+   * ★ 缩放（resize）也要吃网格吸附 ★
+   *
+   *   纯函数测试证明「算得对」，不能证明「拖边框的时候真的传了网格设置进去」。
+   *   这一条走完整手势链路：startResize → pointermove → commitDocument。
+   *   卡片 x=50（不在 32 的格上）是关键：只有「吸边坐标」才能让右边落到 384。
+   */
+  it('snaps the dragged edge to the grid while resizing (and leaves it alone when snap is off)', () => {
+    const node = { id: 'moving', type: 'text', x: 50, y: 50, width: 300, height: 200 } as CanvasNode
+
+    // ① 开吸附：右边 50+300+37=387 ⇒ 吸到 384
+    const snapped = createGestureHarness([{ ...node }], [], { grid: { size: 32, snap: true } })
+    const downSnap = new PointerEvent('pointerdown', { button: 0, clientX: 350, clientY: 150, bubbles: true })
+    Object.defineProperty(downSnap, 'target', { value: document.createElement('div') })
+    snapped.handlers.startResize(node, 'right', downSnap)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 387, clientY: 150 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 387, clientY: 150 }))
+    const snappedGeometry = snapped.state.document.nodes[0]
+    expect(snappedGeometry.x).toBe(50)
+    expect(snappedGeometry.x + snappedGeometry.width).toBe(384)
+
+    // ② 关吸附（对照组）：同样位移必须原样保留
+    const plain = createGestureHarness([{ ...node }], [], { grid: { size: 32, snap: false } })
+    const downPlain = new PointerEvent('pointerdown', { button: 0, clientX: 350, clientY: 150, bubbles: true })
+    Object.defineProperty(downPlain, 'target', { value: document.createElement('div') })
+    plain.handlers.startResize(node, 'right', downPlain)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 387, clientY: 150 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 387, clientY: 150 }))
+    expect(plain.state.document.nodes[0]).toMatchObject({ width: 337, x: 50 })
+  })
+  /**
+   * ★ 缩放（resize）也要吃网格吸附 ★
+   *
+   *   纯函数测试证明「算得对」，不能证明「拖边框的时候真的传了网格设置进去」。
+   *   这一条走完整手势链路：startResize → pointermove → commitDocument。
+   *   卡片 x=50（不在 32 的格上）是关键：只有「吸边坐标」才能让右边落到 384。
+   */
+  it('snaps the dragged edge to the grid while resizing (and leaves it alone when snap is off)', () => {
+    const node = { id: 'moving', type: 'text', x: 50, y: 50, width: 300, height: 200 } as CanvasNode
+
+    // ① 开吸附：右边 50+300+37=387 ⇒ 吸到 384
+    const snapped = createGestureHarness([{ ...node }], [], { grid: { size: 32, snap: true } })
+    const downSnap = new PointerEvent('pointerdown', { button: 0, clientX: 350, clientY: 150, bubbles: true })
+    Object.defineProperty(downSnap, 'target', { value: document.createElement('div') })
+    snapped.handlers.startResize(node, 'right', downSnap)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 387, clientY: 150 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 387, clientY: 150 }))
+    const snappedGeometry = snapped.state.document.nodes[0]
+    expect(snappedGeometry.x).toBe(50)
+    expect(snappedGeometry.x + snappedGeometry.width).toBe(384)
+
+    // ② 关吸附（对照组）：同样位移必须原样保留
+    const plain = createGestureHarness([{ ...node }], [], { grid: { size: 32, snap: false } })
+    const downPlain = new PointerEvent('pointerdown', { button: 0, clientX: 350, clientY: 150, bubbles: true })
+    Object.defineProperty(downPlain, 'target', { value: document.createElement('div') })
+    plain.handlers.startResize(node, 'right', downPlain)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 387, clientY: 150 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 387, clientY: 150 }))
+    expect(plain.state.document.nodes[0]).toMatchObject({ width: 337, x: 50 })
+  })
+  /**
+   * 网格吸附（走**手势层**，不是只测纯函数）。
+   *
+   * 纯函数测试只能证明"算得对"，证明不了"拖卡片的时候真的调用了它"。
+   * 这一组补上后者 —— 本轮加网格吸附时，正是因为没加它，
+   * `gridSettings` 少传一处也全绿（纯函数照样通过）。
+   */
+  it('snaps a dragged card onto the grid when grid snap is enabled', () => {
+    // 起点不在格上（50）：必须能吸上去 —— 这是"落点取整"与"位移取整"的分水岭
+    const moving = { id: 'moving', type: 'text', x: 50, y: 50, width: 100, height: 80 } as CanvasNode
+    const { handlers, state } = createGestureHarness([moving], [], { grid: { size: 32, snap: true } })
+    const pointerDownEvent = new PointerEvent('pointerdown', { button: 0, clientX: 100, clientY: 100, bubbles: true })
+    Object.defineProperty(pointerDownEvent, 'target', { value: document.createElement('div') })
+
+    handlers.handleNodePointerDown(moving, pointerDownEvent)
+    // 位移只有 5px：50+5=55 ⇒ 吸到 64（若按位移取整则会停在 50，永远吸不上去）
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 105, clientY: 105 }))
+
+    expect(state.document.nodes[0]).toMatchObject({ x: 64, y: 64 })
+  })
+
+  it('does not snap when grid snap is disabled (control)', () => {
+    const moving = { id: 'moving', type: 'text', x: 50, y: 50, width: 100, height: 80 } as CanvasNode
+    const { handlers, state } = createGestureHarness([moving], [], { grid: { size: 32, snap: false } })
+    const pointerDownEvent = new PointerEvent('pointerdown', { button: 0, clientX: 100, clientY: 100, bubbles: true })
+    Object.defineProperty(pointerDownEvent, 'target', { value: document.createElement('div') })
+
+    handlers.handleNodePointerDown(moving, pointerDownEvent)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 105, clientY: 105 }))
+
+    // 对照组：关掉吸附必须是原始位移（5px），证明上一条的 64 确实来自吸附
+    expect(state.document.nodes[0]).toMatchObject({ x: 55, y: 55 })
+  })
+
+  it('grid snap respects the configured spacing (a coarser grid snaps further)', () => {
+    const moving = { id: 'moving', type: 'text', x: 50, y: 50, width: 100, height: 80 } as CanvasNode
+    const { handlers, state } = createGestureHarness([moving], [], { grid: { size: 48, snap: true } })
+    const pointerDownEvent = new PointerEvent('pointerdown', { button: 0, clientX: 100, clientY: 100, bubbles: true })
+    Object.defineProperty(pointerDownEvent, 'target', { value: document.createElement('div') })
+
+    handlers.handleNodePointerDown(moving, pointerDownEvent)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 105, clientY: 105 }))
+
+    // 50+5=55 ⇒ 最近的 48 的倍数是 48（55 到 48 差 7，到 96 差 41）
+    expect(state.document.nodes[0]).toMatchObject({ x: 48, y: 48 })
+  })
+
+  /**
+   * ★ 优先级：对齐辅助线**优先于**网格吸附 ★
+   *
+   * 辅助线是"我在跟旁边的卡片对齐"，是更强的意图，阈值只有屏幕 8px；
+   * 网格只是背景参考。若顺序反过来（先辅助线后网格），
+   * 刚对齐好的边会被网格再推走 —— 等于辅助线白开。
+   */
+  it('lets alignment guides win over grid snap when both are enabled', () => {
+    const moving = { id: 'moving', type: 'text', x: 106, y: 220, width: 100, height: 80 } as CanvasNode
+    const target = { id: 'target', type: 'text', x: 100, y: 20, width: 100, height: 80 } as CanvasNode
+    const { alignmentGuides, handlers, state } = createGestureHarness(
+      [moving, target],
+      [],
+      { grid: { size: 32, snap: true }, showDragAlignmentGuides: true },
+    )
+    const pointerDownEvent = new PointerEvent('pointerdown', { button: 0, clientX: 100, clientY: 100, bubbles: true })
+    Object.defineProperty(pointerDownEvent, 'target', { value: document.createElement('div') })
+
+    handlers.handleNodePointerDown(moving, pointerDownEvent)
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 97, clientY: 100 }))
+
+    /**
+     * 两个轴的结果**不同**，正好把顺序说清楚：
+     *   x：106-3=103 ⇒ 网格吸到 96 ⇒ 被 left 辅助线（100，距离 4px < 8px 阈值）拉回 100 ⇒ **辅助线赢**
+     *   y：位移为 0 ⇒ 220 被网格吸到 224 ⇒ 没有横向辅助线纠正 ⇒ 保持吸附结果
+     * 若顺序反过来（先辅助线后网格），x 会从 100 被再推回 96 —— 这条断言就会红。
+     */
+    expect(state.document.nodes[0]).toMatchObject({ x: 100, y: 224 })
+    expect(alignmentGuides.guides).toEqual([{ axis: 'x', kind: 'left', position: 100 }])
+  })
+
   it('snaps selected group bounds while dragging multiple cards', () => {
     const firstNode = { id: 'node-1', type: 'text', x: 306, y: 60, width: 100, height: 80 } as CanvasNode
     const secondNode = { id: 'node-2', type: 'text', x: 456, y: 80, width: 100, height: 80 } as CanvasNode
@@ -827,6 +981,7 @@ describe('canvas editor gesture handlers', () => {
       selectionBox: {} as any,
       selectedEdge: computed(() => null),
       showDragAlignmentGuides: computed(() => true),
+      gridSettings: ref({ ...DEFAULT_CANVAS_GRID_SETTINGS }),
       stageRef: ref(stage),
       state: {
         document: {

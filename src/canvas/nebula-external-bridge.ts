@@ -55,6 +55,8 @@ interface NebulaExternalContract {
   listMounts?: () => Promise<NebulaExternalEnvelope<NebulaMount[]>>
   previewUrl?: (mount: string, path: string) => Promise<NebulaExternalEnvelope<string>>
   stat?: (mount: string, path: string) => Promise<NebulaExternalEnvelope<NebulaEntry>>
+  /** 浏览器可直接打开的地址（网盘侧按类型路由，见下） */
+  webUrl?: (mount: string, path: string, name?: string) => Promise<NebulaExternalEnvelope<string>>
   version?: number
 }
 
@@ -72,13 +74,37 @@ function describeReason(reason: string | undefined): string {
   return "未知错误"
 }
 
+/**
+ * 把失败信封拼成一句用户能懂的话。
+ *
+ * ★ 为什么不是"有 error 就用 error"（原来的写法）★
+ *   网盘侧的 `guard()` **总是**同时给出 `error`（原始异常信息）与 `reason`
+ *   （语义分类 missing / denied / unreachable）。原实现写成
+ *   `envelope.error || describeReason(envelope.reason)`，
+ *   于是 `reason` 这一整段映射**永远不会被用到** —— 是死代码，
+ *   用户看到的是 `网盘 取预览地址 失败：404` 这种"技术信号"，
+ *   而设计意图（保留「连不上」与「不存在」的区别）完全落空。
+ *
+ * 处置：**以语义 reason 为主**，原始 error 作为补充信息附在括号里；
+ *   error 只是三位状态码时（最常见情况）视为与 reason 重复，不再赘述。
+ */
+function describeFailure(envelope: NebulaExternalEnvelope<unknown>): string {
+  const reason = describeReason(envelope && envelope.reason)
+  const error = typeof (envelope && envelope.error) === "string" ? (envelope.error as string).trim() : ""
+
+  if (!error || /^\d{3}$/.test(error)) {
+    return reason
+  }
+
+  return `${reason}（${error}）`
+}
+
 function unwrap<T>(envelope: NebulaExternalEnvelope<T>, label: string): T {
   if (envelope && envelope.ok) {
     return envelope.data as T
   }
 
-  const detail = (envelope && envelope.error) || describeReason(envelope && envelope.reason)
-  throw new Error(`网盘 ${label} 失败：${detail}`)
+  throw new Error(`网盘 ${label} 失败：${describeFailure(envelope)}`)
 }
 
 /** 取网盘插件暴露的对外契约；不存在或版本/方法不全时返回 null。 */
@@ -109,7 +135,14 @@ export function getNebulaExternalContract(): NebulaExternalContract | null {
  * 同形就能**一行不改**地切过去（也便于保留原客户端作为兜底）。
  */
 export class NebulaExternalClient {
-  constructor(private readonly contract: NebulaExternalContract) {}
+  /**
+   * 契约对象**公开只读**，供 `getNebulaClient` 做「对象身份是否变化」的判断。
+   *
+   * 为什么需要它：网盘插件每次重载都会换一个新对象（`window.__nebuladiskPlugin`），
+   * 适配器必须能识别出"契约换人了"并重建，否则会一直调用**旧代码**
+   * （实测：网盘侧修好 `webUrl` 后，画布仍拿到旧的 `[object Promise]`）。
+   */
+  constructor(public readonly contract: NebulaExternalContract) {}
 
   /**
    * 契约存在即视为"已配置" —— 登录由网盘插件负责，画布无需再持有凭据。
@@ -117,6 +150,17 @@ export class NebulaExternalClient {
    */
   isConfigured(): boolean {
     return true
+  }
+
+  /**
+   * 登录：**什么都不用做**。
+   *
+   * 契约存在就说明网盘插件已经登录好了（这正是「画布不再自己配网盘账号密码」的前提）。
+   * 保留这个方法是为了满足消费方"先 login 再 stat"的既有调用顺序，
+   * 而不是暗示这里需要一次真实登录 —— 真实登录属于网盘侧的职责（C-5）。
+   */
+  async login(): Promise<void> {
+    /* no-op：契约可用即已登录 */
   }
 
   async listMounts(): Promise<NebulaMount[]> {
@@ -158,6 +202,31 @@ export class NebulaExternalClient {
     const url = unwrap(await this.contract.cadUrl(mount, path), "取 CAD 预览地址")
     if (!url) {
       throw new Error("网盘未返回 CAD 预览地址")
+    }
+    return url
+  }
+
+  /**
+   * ★ 「浏览器可直接打开的地址」—— 独立网页双击网盘卡片时用这个 ★
+   *
+   * 为什么**不**在这里按扩展名自己分流（`pickViewer` + preview/cad 二选一）：
+   *   网盘侧已经有一个专门的调度器（`browserViewUrl`），它按类型给出三档结果：
+   *     · CAD            → cad-viewer 深链
+   *     · 原生类型       → `/api/raw` 签名直链（pdf/图片/视频/音频/文本，零转换最快）
+   *     · Office/压缩包/其它 → kkFileView 在线预览页
+   *   并且它自己处理了「容器内主机名 → 浏览器可达地址」的改写（C-4 的核心）。
+   *   我们这边再写一份分流 = 两套规则必然漂移，而且**必然漏掉地址改写**。
+   *
+   * 契约里没有这个方法时抛错（调用方降级提示），**不猜** ——
+   * 老版本网盘插件的 `previewUrl` 对 office 会给出错误通道，猜出来的结果比明确报错更糟。
+   */
+  async webUrl(mount: string, path: string, name?: string): Promise<string> {
+    if (typeof this.contract.webUrl !== "function") {
+      throw new Error("网盘未提供「网页打开地址」能力")
+    }
+    const url = unwrap(await this.contract.webUrl(mount, path, name), "取网页打开地址")
+    if (!url) {
+      throw new Error("网盘未返回网页打开地址")
     }
     return url
   }

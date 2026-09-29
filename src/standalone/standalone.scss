@@ -1,0 +1,103 @@
+/**
+ * 独立网页编辑器的样式。
+ * ============================================================================
+ *
+ * ★ 这里**只放不会与思源样式打架的东西** ★
+ *   本文件的 CSS 会被打进 `standalone.css`，在 `<head>` 里的位置**早于**
+ *   运行时注入的思源样式表（base.css / theme.css）—— 同权重时后加载者胜。
+ *   所以凡是需要跟思源基础样式"抢"的规则（`html` / `body` / `#app` 的尺寸），
+ *   都不写在这里，而是由 `standalone.ts` 追加一段**置于 head 末尾**的关键布局样式。
+ *
+ *   而下面这些类名（`.dc-standalone-*`）是独立页独有的，思源侧不存在同名规则，
+ *   不存在权重冲突，放这里最清晰。
+ *
+ * ★ 颜色一律走思源主题变量 ★
+ *   思源的 base.css + theme.css 会先被注入，所以 `--b3-theme-*` 一定有值，
+ *   深浅主题自动跟随，不需要也不应该写死颜色。
+ *   （兜底值只在极端情况下用得到，例如样式表注入失败。）
+ */
+
+/* ── 首屏加载 / 致命错误 ───────────────────────────────────────── */
+
+.dc-standalone__loading,
+.dc-standalone__error {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--b3-theme-on-surface, #5f6368);
+}
+
+.dc-standalone__error {
+  color: var(--b3-theme-error, #d23f31);
+}
+
+.dc-standalone__error code {
+  padding: 1px 6px;
+  font-family: var(--b3-font-family-code, ui-monospace, monospace);
+  font-size: 12.5px;
+  color: var(--b3-theme-on-surface, #5f6368);
+  background: var(--b3-theme-surface, rgba(0, 0, 0, 0.05));
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.dc-standalone__hint {
+  max-width: 520px;
+  font-size: 12.5px;
+  color: var(--b3-theme-on-surface-light, #8a8f98);
+}
+
+/* 加载指示条：不用图片/GIF，纯 CSS，避免额外资源 */
+.dc-standalone__spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid color-mix(in srgb, var(--b3-theme-on-surface, #1f1f1f) 15%, transparent);
+  border-top-color: var(--b3-theme-primary, #3575f0);
+  border-radius: 50%;
+  animation: dc-standalone-spin 0.9s linear infinite;
+}
+
+@keyframes dc-standalone-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Toast（替代思源的 showMessage 外观） ──────────────────────── */
+
+.dc-standalone-snackbar {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  z-index: 2147483000;
+  max-width: 70vw;
+  padding: 9px 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--b3-theme-on-inverse, #fff);
+  background: var(--b3-theme-inverse, rgba(0, 0, 0, 0.85));
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+  word-break: break-word;
+}
+
+.dc-standalone-snackbar--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.dc-standalone-snackbar--error {
+  background: var(--b3-theme-error, #d23f31);
+  color: #fff;
+}

@@ -65,8 +65,20 @@ type CanvasEmbedTranslate = (
 ) => string
 
 /** 生成 data-info 串：`<插件名>/<块类型>` */
+/**
+ * 历史插件名（**只增不减**）。
+ *
+ * 用处：笔记里的嵌入块存的是围栏 info 原文 `;;;<插件名>/canvas`，
+ * 插件改名后必须继续认旧名字，否则用户已有笔记里的画布会**当场变成一段 JSON 文本**。
+ * 每次改名把被替换掉的那个名字追加到这里。
+ */
+export const CANVAS_EMBED_LEGACY_PLUGIN_NAMES: readonly string[] = [
+  // 2026-09-29 前的名字（改名 siyuan-diskcanvas-next → siyuan-diskcanvas）
+  "siyuan-diskcanvas-next",
+]
+
 export function canvasEmbedLang(pluginName: string): string {
-  return `${pluginName || "siyuan-diskcanvas-next"}/${CANVAS_EMBED_BLOCK_TYPE}`
+  return `${pluginName || "siyuan-diskcanvas"}/${CANVAS_EMBED_BLOCK_TYPE}`
 }
 
 export interface CanvasEmbedSpec {
@@ -599,12 +611,41 @@ export function registerCanvasEmbedBlock(
     },
   }
 
+  /**
+   * ★★ 旧插件名的兼容（2026-09-29：`siyuan-diskcanvas-next` → `siyuan-diskcanvas`）★★
+   *
+   *   笔记正文里的嵌入块存的是**围栏 info 原文**：`;;;<插件名>/canvas`。
+   *   改名后如果只注册新名字，用户**已有笔记里的画布嵌入会立刻停止渲染**
+   *   （退回思源的占位 <pre>，也就是"画布变成一段 JSON 文本"）。
+   *   那不是"旧数据"—— 是用户正在用的内容，必须继续认。
+   *
+   *   ⇒ 新名与旧名**都注册**；`lastRegisteredLangs` 也带上旧名，
+   *     这样"补渲染"（思源先渲染、我们后注册的那种块）同样能救回旧名字的块。
+   *     旧名只增不减：将来再改名时把当前名继续往里加即可。
+   */
+  /**
+   * ★ 注册键要**对称**：当前名与历史名都注册 `<名>/canvas` ★
+   *
+   *   实测抓到的缺陷：改造时只给"历史名"注册了 `<名>/canvas`，
+   *   当前名那边却只有 `"canvas"` 与裸插件名两个键 ⇒
+   *   `customBlockRenders` 里的键是 `["canvas", "<当前名>", "<旧名>/canvas"]`，
+   *   而"补渲染"识别的 lang 列表里却有 `<当前名>/canvas` ——
+   *   **注册表与识别列表不一致**，新名的嵌入块一旦需要补渲染就对不上。
+   */
+  const langs = [
+    canvasEmbedLang(plugin.name),
+    ...CANVAS_EMBED_LEGACY_PLUGIN_NAMES.map((name) => canvasEmbedLang(name)),
+  ]
+
   plugin.customBlockRenders = plugin.customBlockRenders || {}
   plugin.customBlockRenders[CANVAS_EMBED_BLOCK_TYPE] = renderer
   plugin.customBlockRenders[plugin.name] = renderer
+  for (const lang of langs) {
+    plugin.customBlockRenders[lang] = renderer
+  }
 
   lastRegisteredRenderer = renderer
-  lastRegisteredLangs = [canvasEmbedLang(plugin.name), plugin.name]
+  lastRegisteredLangs = [plugin.name, ...langs]
 }
 
 /** 最近一次注册的渲染器与它认的 lang —— 供「补渲染」使用 */

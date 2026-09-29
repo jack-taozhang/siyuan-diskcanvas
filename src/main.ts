@@ -28,6 +28,19 @@ export interface CanvasTabBootstrap {
    *      同一条 .canvas 可能同时被页签实例打开，嵌入实例若也写盘就会互相覆盖。
    */
   embed?: boolean
+  /**
+   * 独立网页模式（由 `standalone.html` 挂载，见 `src/standalone.ts`）。
+   *
+   * ★ 只用于**界面显隐**，不参与任何能力/只读判定 ★
+   *   唯一用途：隐藏工具栏上那个「在独立网页中打开」按钮 —— 已经在本页了，
+   *   再点只会再开一个同样的窗口。
+   *
+   *   「能不能编辑 / 能不能落盘」仍由 `canvas-interaction-policy.ts` 的能力矩阵
+   *   单一决定（独立页与页签同为"可编辑"，矩阵里**没有**新增只读来源）。
+   *   这点很重要：新加一个信号很容易顺手把它塞进 `readonly`，
+   *   那会让独立页莫名其妙变成只读预览。
+   */
+  standalone?: boolean
 }
 
 export function bindPlugin(plugin: Plugin): void {

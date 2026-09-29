@@ -20,10 +20,36 @@ import {
 export interface NebulaClientLike {
   cadUrl(mount: string, path: string): Promise<string>
   isConfigured(): boolean
+  /**
+   * 确保已登录（幂等）。
+   *
+   * ★ 声明成**可选**是刻意的 ★
+   *   契约适配器根本没有"登录"这件事 —— 登录由网盘插件负责（C-5：网盘不认识消费方，
+   *   消费方也不该插手网盘的会话）。调用点写成 `await client.login?.()`，
+   *   于是两种实现都能用，且**类型上就能看出"这一步可能没有"**。
+   *
+   *   这里的类型不是装饰：`canvas/use-canvas-editor-file-nodes.ts` 里原本写的是
+   *   `await client.login()`，而接口里没有这个方法 —— 因为项目没有类型检查步骤，
+   *   它一路构建成功，运行时报 `A.login is not a function`，
+   *   被 catch 吞掉后表现为"网盘卡片的详情/缩略图永远出不来"，
+   *   排查时完全想不到是**接口少声明了一个方法**。
+   */
+  login?(): Promise<unknown>
   list(mount: string, path: string): Promise<NebulaEntry[]>
   listMounts(): Promise<NebulaMount[]>
   previewUrl(mount: string, path: string): Promise<string>
   stat(mount: string, path: string): Promise<NebulaEntry>
+  /**
+   * 浏览器可直接打开的地址（网盘侧按类型路由）。
+   *
+   * ★ 为什么是**可选**的 ★
+   *   它是「网盘侧构造 URL」这条约束（C-4）的产物，只有契约适配器能给。
+   *   画布自己的兜底客户端（`NebulaClient`）没有这个能力 ——
+   *   而**必须**让它保持"没有"：在消费方补齐"按类型分流 + 地址改写"
+   *   等于把网盘的内部知识复制一份过来，两套规则必然漂移。
+   *   ⇒ 拿不到就明确报错，由调用方提示用户升级网盘插件。
+   */
+  webUrl?(mount: string, path: string, name?: string): Promise<string>
 }
 
 /**
@@ -74,7 +100,20 @@ export function getNebulaClient(settings?: NebulaSettings): NebulaClientLike | n
   // ① 首选：网盘插件契约
   const contract = getNebulaExternalContract()
   if (contract) {
-    externalClient ??= new NebulaExternalClient(contract)
+    /**
+     * ★ 契约**换了对象**就重建适配器 ★
+     *
+     *   网盘插件每次重载都会新建 `window.__nebuladiskPlugin`（含 `.external`）。
+     *   如果这里只做 `externalClient ??= new ...`，适配器会**永远抱着第一次那个对象**，
+     *   于是网盘插件升级 / 重载之后，画布仍在调**旧代码** —— 实测踩过：
+     *   网盘侧修好了 `webUrl`（原来漏 await 返回 "[object Promise]"），
+     *   而独立页里的画布仍拿到占位串，因为它在页面加载时就把旧契约钉住了。
+     *
+     *   按对象身份识别重建，成本是一次引用比较，收益是"插件重载后自动跟上"。
+     */
+    if (!externalClient || externalClient.contract !== contract) {
+      externalClient = new NebulaExternalClient(contract)
+    }
     return externalClient
   }
 

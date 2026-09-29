@@ -68,7 +68,7 @@ console.log("✓ 默认导出是构造函数:", Plugin.name || "(匿名)")
 
 // 3) 尝试实例化（触发顶层副作用 / 类字段初始化）
 try {
-  const p = new Plugin({ name: "siyuan-diskcanvas-next" })
+  const p = new Plugin({ name: "siyuan-diskcanvas" })
   console.log("✓ 实例化成功")
   for (const m of ["onload", "onunload", "openSetting", "openCanvasTab", "getCanvasSettings", "getCanvasUiState", "getRecentCanvasFiles", "updateCanvasSettings", "updateCanvasUiState", "registerToApiSwitch", "getOrCreateWorkspaceTree"]) {
     console.log("  " + (typeof p[m] === "function" ? "✓" : "✗") + " " + m + " : " + typeof p[m])

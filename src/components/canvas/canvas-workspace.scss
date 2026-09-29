@@ -355,6 +355,144 @@
   color: var(--canvas-success);
 }
 
+/* ────────────────────────── 网格线设置弹层 ──────────────────────────
+ *
+ * 视觉与 `.toolbar__theme-popover` 保持同一套变量（浮层底色 / 描边 / 圆角），
+ * 这样两个弹层放在一起不会像"两个不同的插件"。
+ * 区别只有宽度与内部排版：这里有三段（样式 / 间距 / 吸附），需要换行排。
+ */
+.toolbar__grid-popover {
+  min-width: 232px;
+  max-width: 264px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--canvas-floating-bg, var(--b3-theme-surface));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  border: 1px solid var(--canvas-floating-border, var(--b3-border-color));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar__grid-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolbar__grid-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--b3-theme-on-surface);
+}
+
+.toolbar__grid-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--b3-theme-on-surface-light);
+}
+
+.toolbar__grid-hint--warn {
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--canvas-warning);
+  background: color-mix(in srgb, var(--canvas-warning) 12%, transparent);
+}
+
+.toolbar__grid-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.toolbar__grid-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--canvas-floating-button-bg);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--b3-theme-on-surface);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.toolbar__grid-option:hover {
+  background: var(--canvas-floating-button-bg-hover);
+}
+
+.toolbar__grid-option--active {
+  border-color: var(--canvas-accent-strong);
+  color: var(--canvas-accent-strong);
+}
+
+/* 间距预设只显示数字：4 个按钮要能在 232px 内一行放下 */
+.toolbar__grid-option--compact {
+  min-width: 38px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * 样式预览小图（12×12）。
+ *
+ * 用 `background-image` 直接画出对应样式，而不是塞四个 SVG：
+ * 保证"预览"与"实际"用的是同一种几何（线 vs 点），不会两边走偏。
+ */
+.toolbar__grid-swatch {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border-radius: 2px;
+  background-color: color-mix(in srgb, var(--b3-theme-on-surface) 22%, transparent);
+}
+
+.toolbar__grid-swatch--none {
+  background-color: transparent;
+  border: 1px dashed var(--b3-theme-on-surface-light);
+}
+
+.toolbar__grid-swatch--grid {
+  background-image:
+    linear-gradient(var(--b3-theme-surface) 1px, transparent 1px),
+    linear-gradient(90deg, var(--b3-theme-surface) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+.toolbar__grid-swatch--hlines {
+  background-image: linear-gradient(var(--b3-theme-surface) 1px, transparent 1px);
+  background-size: 12px 4px;
+}
+
+.toolbar__grid-swatch--vlines {
+  background-image: linear-gradient(90deg, var(--b3-theme-surface) 1px, transparent 1px);
+  background-size: 4px 12px;
+}
+
+.toolbar__grid-swatch--dots {
+  background-color: transparent;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--b3-theme-on-surface) 45%, transparent) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+.toolbar__grid-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toolbar__grid-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .toolbar__theme-popover {
   min-width: 220px;
   padding: 4px;
@@ -542,10 +680,24 @@
   min-height: 0;
   box-sizing: border-box;
   background-color: var(--canvas-bg);
-  background-image:
-    linear-gradient(var(--canvas-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px);
-  background-size: 32px 32px;
+
+  /* ★ 网格背景在这里**不再写死** ★
+   *
+   * 原来这里是：
+   *   background-image: linear-gradient(var(--canvas-grid) 1px, transparent 1px),
+   *                     linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px);
+   *   background-size: 32px 32px;
+   * 那是一张**固定屏幕尺寸的纹理** —— 缩放平移时它纹丝不动，
+   * 于是拖卡片时像"在固定纹理上滑"，作为对齐参考完全失效。
+   *
+   * 现在三项（图案 / 间距 / 偏移）都由 `canvas/grid.ts` 按**世界坐标**算好，
+   * 通过行内 style 绑定（`stageGridCssStyle`）打在 `.stage` 上：
+   *   间距 = gridSize × viewport.scale
+   *   偏移 = viewport.{x,y}
+   * 所以这里**什么都不能写** —— 行内样式虽然优先级更高，但留一份死值
+   * 会让下一个人以为它仍然生效（"改了没反应"的经典成因）。
+   * 变量 `--canvas-grid` 仍然在（它就是网格线的颜色，见文件上方定义）。
+   */
   touch-action: none;
 }
 
@@ -3003,7 +3155,8 @@
 .canvas-dialog-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  /* 必须高于 `.canvas-toolbar`（z-index: 10），否则模态框顶部被工具栏盖住 */
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: center;

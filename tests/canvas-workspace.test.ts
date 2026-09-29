@@ -600,6 +600,71 @@ describe("CanvasWorkspace", () => {
     expect(wrapper.find(".canvas-node--file .canvas-node__header-title").text()).toBe("Spec")
   })
 
+  it("shows the type name (not the file name) in the header of a nested canvas card", async () => {
+    /**
+     * ★ 用户需求（第 35 轮）：「网盘文库 和 画布 文件 块的 风格不一样。
+     *   需要调整 画布文件块。」★
+     *
+     * 差异之一：网盘卡片抬头是**类型名**（「网盘文件」），
+     * 而画布卡片抬头显示的是**文件名**（`未命名43.canvas`）——
+     * 因为它此前没有 `canvas` 分支，直接落进了 `getNodeTitle` 兜底。
+     *
+     * 现在补上 `canvas` 分支，抬头也显示类型名「画布文件」，
+     * 与网盘卡片结构一致（抬头 = 类型名，正文 = 文件名 + 路径）。
+     */
+    const node = {
+      id: "file-1",
+      file: "/data/storage/petal/siyuan-diskcanvas/研发设计/未命名43.canvas",
+      type: "file",
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 180,
+    }
+    currentEditor = createEditorMock(node)
+    // 解析结果是 canvas —— 这是分支判据的事实来源
+    currentEditor.getFileNodeKind = vi.fn(() => "canvas")
+    // 文件名兜底**故意给一个不同的值**：若抬头显示它，说明没走新分支
+    currentEditor.getNodeTitle = vi.fn(() => "未命名43.canvas")
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    const headerTitle = wrapper.find(".canvas-node--file .canvas-node__header-title").text()
+    // 抬头 = 类型名（中文 i18n 里 canvasFileCardTitle = 「画布文件」）
+    expect(headerTitle).toBe("画布文件")
+    // 绝不能是文件名
+    expect(headerTitle).not.toBe("未命名43.canvas")
+  })
+
+  it("removes the canvas file manager button from the top toolbar", async () => {
+    /**
+     * ★ 用户需求（第 35 轮）：「顶部工具栏的画布文件管理按钮 删除」★
+     *
+     * ★ 只删入口、不删能力 ★
+     *   管理窗口仍由底部工具条的「插入画布」（`bottom-toolbar-canvas`）打开，
+     *   所以这里同时断言底部那个**还在** —— 否则将来有人误以为
+     *   "文件管理器整个不要了"，把 capability 一起拆掉。
+     */
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    expect(wrapper.find('[data-testid="top-toolbar-file-manager"]').exists()).toBe(false)
+  })
+
   it("lets a text card enter inline markdown editing and saves on blur", async () => {
     const node = createTextNode()
     currentEditor = createEditorMock(node)

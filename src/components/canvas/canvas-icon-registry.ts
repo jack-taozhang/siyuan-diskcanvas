@@ -68,6 +68,8 @@ export type CanvasIconName =
   | 'nebula'
   | 'note'
   | 'asset'
+  | 'open-external'
+  | 'grid'
 
 export const CANVAS_ICON_MARKUP: Record<CanvasIconName, string> = {
   // 网盘：云 + 向下箭头（"从云端取下来"）
@@ -76,6 +78,22 @@ export const CANVAS_ICON_MARKUP: Record<CanvasIconName, string> = {
   note: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 6C9 4.89543 9.89543 4 11 4H30L41 15V42C41 43.1046 40.1046 44 39 44H11C9.89543 44 9 43.1046 9 42V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M30 4V15H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 24H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 32H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // 思源资源：图片框 + 山形 + 太阳（区别于网盘的"云"与笔记的"文档"）
   asset: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="9" width="36" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="17" cy="19" r="3.5" fill="none" stroke="currentColor" stroke-width="3"/><path d="M8 34L18 24L26 32L32 26L40 34" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  /**
+   * 「在独立网页中打开」—— 方框 + 右上角外跳箭头（通用 external-link 语义）。
+   *
+   * 刻意不用「方框 + 文字行」（那更像"新窗口/新页签"），也不用箭头朝内 ——
+   * 工具栏上紧邻的是「帮助」（圆圈问号）与「折叠」（左尖角），
+   * 本图形靠**直角方框 + 对角箭头**，与两者轮廓差异足够大，一眼可辨。
+   */
+  /**
+   * 「网格」—— 3×3 的方格线（外框 + 两条竖线 + 两条横线）。
+   *
+   * 刻意不用「四个小方块」（那是"布局/宫格"的语义），也不用点阵 ——
+   * 画布上真的会出现线、也可能换成点阵，用一个**能同时暗示两者**的方框网格最稳：
+   * 它在小尺寸下轮廓清楚，与相邻的「调色板」（圆+水滴）「帮助」（圆圈问号）差异明显。
+   */
+  grid: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 8C8 6.89543 8.89543 6 10 6H38C39.1046 6 40 6.89543 40 8V40C40 41.1046 39.1046 42 38 42H10C8.89543 42 8 41.1046 8 40V8Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M18.67 6V42" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M29.33 6V42" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 18.67H40" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 29.33H40" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,
+  'open-external': `<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.5 4H20V10.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 4L11.5 12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 14.5V19C19 19.5523 18.5523 20 18 20H5C4.44772 20 4 19.5523 4 19V6C4 5.44772 4.44772 5 5 5H9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   sprout: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 4V24M24 24L38 10M24 24L38 38M24 24L10 38M24 24L10 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="24" r="5" fill="currentColor"/></svg>`,
   'ai-search': `<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.09 14.999a6.9 6.9 0 0 1-.59-2.794C5.5 8.5 8.41 5.499 12 5.499s6.5 3.002 6.5 6.706a6.9 6.9 0 0 1-.59 2.794m-5.91-13v1m10 9h-1m-18 0H2m17.07-7.071l-.707.707m-12.726.001l-.707-.707m9.587 14.377c1.01-.327 1.416-1.252 1.53-2.182c.034-.278-.195-.509-.475-.509H8.477a.483.483 0 0 0-.488.534c.112.928.394 1.606 1.464 2.156m5.064 0H9.453m5.064 0c-.121 1.945-.683 2.716-2.51 2.694c-1.954.036-2.404-.916-2.554-2.693" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   'loading-spinner': `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" class="diskcanvas-spinner-svg"><path d="M4 24C4 35.0457 12.9543 44 24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><style>.diskcanvas-spinner-svg { animation: diskcanvas-rotate 1s linear infinite; } @keyframes diskcanvas-rotate { 100% { transform: rotate(360deg); } }</style></svg>`,

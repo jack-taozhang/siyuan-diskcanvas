@@ -408,9 +408,9 @@ export default class SiyuanCanvasPlugin extends Plugin {
      * 真机实测（CDP + Network + 调用栈，NAS <netdisk-host>）复现的缺陷：
      *   画布页签一挂载就调用 `initializeCanvasEditor` →
      *   `rememberRecentPath()` → `rememberRecentCanvas()` → `saveData()` →
-     *   `/api/file/putFile` 写 `data/storage/petal/siyuan-diskcanvas-next/diskcanvas-plugin-data` →
+     *   `/api/file/putFile` 写 `data/storage/petal/siyuan-diskcanvas/diskcanvas-plugin-data` →
      *   思源把这次写入通过 **WebSocket 广播给所有前端（包括发起写入的本前端）**：
-     *     `reloadPlugin{dataChangePlugins:["siyuan-diskcanvas-next"],dataChangeReason:"overwrite"}`
+     *     `reloadPlugin{dataChangePlugins:["siyuan-diskcanvas"],dataChangeReason:"overwrite"}`
      *   （对应 SiYuan issue #19187：petal 写入未携带受信 `app` 时用
      *     `BroadcastByType` 而非 `BroadcastByTypeAndExcludeApp`）
      *   → 插件被重载 → 页签 init 再次执行 → 再次写盘 → **每 ~5 秒一轮，永不停止**。

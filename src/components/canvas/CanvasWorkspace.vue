@@ -208,6 +208,27 @@
             name="color"
           />
         </button>
+        <!--
+          「网格线」—— 紧挨调色板按钮：两者都是"画布长什么样"的**显示设置**，
+          放同一组里比塞进缩放那一组（那是"看哪儿"）更符合分组语义。
+        -->
+        <button
+          ref="gridButtonRef"
+          class="toolbar__button toolbar__button--icon"
+          :class="{ 'toolbar__button--active': gridPopoverOpen }"
+          data-testid="top-toolbar-grid"
+          :aria-label="t('toolbarGrid')"
+          :data-tooltip="t('toolbarGrid')"
+          aria-haspopup="menu"
+          :aria-expanded="gridPopoverOpen"
+          type="button"
+          @click="toggleGridPopover"
+        >
+          <CanvasIcon
+            class="toolbar__icon"
+            name="grid"
+          />
+        </button>
       </div>
       <div class="toolbar__meta">
         <span class="toolbar__meta-stats">{{ t("toolbarGraphStats", { nodes: editor.state.document.nodes.length, edges: editor.state.document.edges.length }) }}</span>
@@ -247,6 +268,38 @@
             name="help"
           />
         </button>
+        <!--
+          「在独立网页中打开」—— 位置固定在**帮助按钮之后**（用户指定）。
+
+          `v-if="!isStandalonePage"`：独立页里再点它只会又开一个同样的窗口，
+          所以直接不显示。注意这只是**显隐**，不影响任何能力判定。
+        -->
+        <button
+          v-if="!isStandalonePage"
+          class="toolbar__button toolbar__button--icon"
+          data-testid="top-toolbar-open-standalone"
+          :aria-label="t('toolbarOpenStandalone')"
+          :data-tooltip="t('toolbarOpenStandalone')"
+          type="button"
+          @click="openInStandalonePage"
+        >
+          <CanvasIcon
+            class="toolbar__icon"
+            name="open-external"
+          />
+        </button>
+        <!--
+          ★ 「画布文件管理」按钮已从顶部工具栏移除（第 35 轮，用户要求）★
+
+          用户原话：「顶部工具栏的画布文件管理按钮 删除」。
+
+          管理窗口**功能保留**，仍有唯一入口：底部工具条的「插入画布」
+          （`bottom-toolbar-canvas`，见下方）—— 那里点开的是同一个窗口。
+          所以删掉的只是这个重复入口，不是能力本身。
+
+          注意：不要顺手删 `.toolbar__button--icon` 之类样式，也不要删
+          `fileManagerVisible` / `openFileManager` —— 底部工具条还在用。
+        -->
         <button
           class="toolbar__button toolbar__button--icon"
           data-testid="top-toolbar-collapse"
@@ -311,6 +364,83 @@
           </span>
         </button>
       </div>
+
+      <!--
+        「网格线」设置弹层。
+        结构与调色板弹层保持一致（Teleport 到 body + fixed 定位 + @pointerdown.stop），
+        `@pointerdown.stop` 是必须的：否则点弹层内部会触发 document 上的
+        "点外面就关"逻辑，弹层一按就消失（思源里这个坑踩过）。
+      -->
+      <div
+        v-if="gridPopoverOpen"
+        class="toolbar__grid-popover"
+        data-testid="toolbar-grid-popover"
+        :style="gridPopoverStyle"
+        @pointerdown.stop
+      >
+        <div class="toolbar__grid-section" data-testid="grid-section-style">
+          <div class="toolbar__grid-label">{{ t("gridStyleTitle") }}</div>
+          <div class="toolbar__grid-options">
+            <button
+              v-for="style in CANVAS_GRID_STYLES"
+              :key="style"
+              class="toolbar__grid-option"
+              :class="{ 'toolbar__grid-option--active': gridSettings.style === style }"
+              :data-testid="`grid-style-${style}`"
+              type="button"
+              @click="updateGridSettings({ style })"
+            >
+              <span class="toolbar__grid-swatch" :class="`toolbar__grid-swatch--${style}`" aria-hidden="true" />
+              <span class="toolbar__grid-option-text">{{ t(GRID_STYLE_LABEL_KEYS[style]) }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar__grid-section" data-testid="grid-section-size">
+          <div class="toolbar__grid-label">{{ t("gridSizeTitle") }}</div>
+          <div class="toolbar__grid-options">
+            <button
+              v-for="preset in CANVAS_GRID_SIZE_PRESETS"
+              :key="preset"
+              class="toolbar__grid-option toolbar__grid-option--compact"
+              :class="{ 'toolbar__grid-option--active': gridSettings.size === preset }"
+              :data-testid="`grid-size-${preset}`"
+              type="button"
+              @click="updateGridSettings({ size: preset })"
+            >
+              {{ preset }}
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar__grid-section" data-testid="grid-section-snap">
+          <label class="toolbar__grid-switch">
+            <input
+              class="b3-switch"
+              type="checkbox"
+              data-testid="grid-snap-toggle"
+              :checked="gridSettings.snap"
+              @change="updateGridSettings({ snap: ($event.target as HTMLInputElement).checked })"
+            >
+            <span class="toolbar__grid-switch-text">
+              <span class="toolbar__grid-label">{{ t("gridSnapTitle") }}</span>
+              <span class="toolbar__grid-hint">{{ t("gridSnapHint") }}</span>
+            </span>
+          </label>
+        </div>
+
+        <!--
+          反饋：网格因为缩放太小被自动隐藏时，用户会以为"设置没生效"。
+          这里明确说一句，比让人对着一个空画布猜要好。
+        -->
+        <div
+          v-if="!stageGridBackground.visible && gridSettings.style !== 'none'"
+          class="toolbar__grid-hint toolbar__grid-hint--warn"
+          data-testid="grid-too-dense-hint"
+        >
+          {{ t("gridTooDenseHint") }}
+        </div>
+      </div>
     </Teleport>
 
     <div
@@ -322,6 +452,7 @@
         :class="{
           'stage--readonly': editor.readonly,
         }"
+        :style="stageGridCssStyle"
         @pointerdown="handleStagePointerDown"
         @dblclick="handleStageDoubleClick"
         @paste="handleStagePaste"
@@ -585,6 +716,7 @@
               <template v-else-if="node.type === 'file'">
                 <div v-native-render data-canvas-field="note">
                   <CanvasFileCard
+                    :canvas-headline="t('canvasFileCardTitle')"
                     :canvas-thumbnail-view-box="getCanvasThumbnailViewBox(editor.getFileNodePreview(node).thumbnail)"
                     :document-preview-html="getFileCardDocumentPreviewHtml(node)"
                     :image-src="getFileCardImageSource(node)"
@@ -1168,6 +1300,28 @@
               name="text"
             />
           </button>
+          <!--
+            「插入画布」—— 位置固定在**文本右边、笔记左边**（用户指定）。
+
+            点它打开的是**同一个**画布文件管理窗口（工具栏右上角那个）。
+            之所以复用而不另做选择器：管理窗口本身已经具备"浏览 + 搜索 + 插入"
+            三个能力，再做一个只有列表的轻量选择器等于把同一套逻辑写两遍。
+            用户从这儿进来时的意图更明确（就是要插一张），窗口里的「插入画布」
+            按钮就在每一行上，路径一致。
+          -->
+          <button
+            class="bottom-toolbar__button"
+            data-testid="bottom-toolbar-canvas"
+            :aria-label="t('bottomToolbarCanvas')"
+            :data-tooltip="t('bottomToolbarCanvas')"
+            type="button"
+            @click.stop="openFileManager"
+          >
+            <CanvasIcon
+              class="bottom-toolbar__icon"
+              name="canvas-file"
+            />
+          </button>
           <button
             class="bottom-toolbar__button"
             data-testid="bottom-toolbar-file"
@@ -1589,6 +1743,26 @@
       @confirm="handlePngExportConfirm"
     />
 
+    <!--
+      「所有画布文件」管理窗口（工具栏「独立打开」右侧按钮打开）。
+
+      `notify` 以 prop 注入 `showMessage`：对话框不 import siyuan，
+      独立页里也就能用同一份组件（那边同样是同一个 showMessage）。
+    -->
+    <CanvasFileManagerDialog
+      v-if="fileManagerVisible"
+      :active-path="editor.state.filePath"
+      :default-directory="editor.defaultCanvasDirectory"
+      :notify="showMessage"
+      :t="t"
+      @close="fileManagerVisible = false"
+      @deleted="onManagerFileDeleted"
+      @insert="onManagerInsert"
+      @open="onManagerOpen"
+      @reload="onManagerReload"
+      @renamed="onManagerRenamed"
+    />
+
     <input
       ref="fileInputRef"
       accept=".canvas,application/json"
@@ -1637,6 +1811,7 @@ import {
 import CanvasCreateEdgeDialog from "@/components/canvas/CanvasCreateEdgeDialog.vue"
 import { openHelpDialog } from "@/canvas/help-dialog"
 import CanvasFileCard from "@/components/canvas/CanvasFileCard.vue"
+import CanvasFileManagerDialog from "@/components/canvas/CanvasFileManagerDialog.vue"
 import CanvasMinimap from "@/components/canvas/CanvasMinimap.vue"
 import CanvasNebulaPickerDialog from "@/components/canvas/CanvasNebulaPickerDialog.vue"
 import CanvasPngExportDialog from "@/components/canvas/CanvasPngExportDialog.vue"
@@ -1678,6 +1853,16 @@ import type { CanvasFilePickerOption } from "@/canvas/file-picker-dialog"
 import { getVideoEmbedUrl } from "@/canvas/markdown-preview"
 import { triggerNativeProtyleRender } from "@/canvas/protyle-native-render"
 import { createCanvasNode, createCanvasEdge } from "@/canvas/document"
+import { resolveCanvasScanRoots, findMissingWorkspacePaths } from "@/canvas/canvas-file-actions"
+import { buildStandalonePageUrl } from "@/standalone/standalone-url"
+import type { CanvasGridSettings, CanvasGridStyle } from "@/canvas/grid"
+import { readCanvasExposedNumber, readCanvasExposedValue } from "@/canvas/ref-access"
+import {
+  CANVAS_GRID_SIZE_PRESETS,
+  CANVAS_GRID_STYLES,
+  normalizeCanvasGridSettings,
+  resolveCanvasGridBackground,
+} from "@/canvas/grid"
 import {
   computeViewportVisibleBounds,
   isNodeInViewportBounds,
@@ -2276,9 +2461,141 @@ function closeColorThemePopover(event: PointerEvent) {
   }
 }
 
+/* ────────────────────────── 网格线设置 ────────────────────────── */
+
+/**
+ * 样式 → i18n 键。
+ *
+ * 写成 `Record<CanvasGridStyle, 具体键名>` 而不是 `Record<..., string>`：
+ * 前者能在**编译期**保证"新增一种网格样式"必然补上文案，
+ * 后者会静默渲染出空白菜单项。键名用字面量联合，`t()` 也因此能查到类型。
+ */
+const GRID_STYLE_LABEL_KEYS: Record<CanvasGridStyle, "gridStyleDots" | "gridStyleGrid" | "gridStyleHlines" | "gridStyleNone" | "gridStyleVlines"> = {
+  dots: "gridStyleDots",
+  grid: "gridStyleGrid",
+  hlines: "gridStyleHlines",
+  none: "gridStyleNone",
+  vlines: "gridStyleVlines",
+}
+
+const gridPopoverOpen = ref(false)
+const gridPopoverStyle = ref<Record<string, string>>({})
+const gridButtonRef = ref<HTMLButtonElement>()
+
+/**
+ * 当前网格设置（编辑器里的那份 ref 是单一数据源，工具栏与设置面板写的是同一份）。
+ *
+ * ★★ 为什么这里要"显式解包一次"，不能直接写 editor.gridSettings ★★
+ *
+ *   `useCanvasEditor` 返回的是**普通对象**，里面装着一堆 ref。
+ *   在 `<script setup>` 的**模板**里，顶层绑定会被自动解包；
+ *   但**嵌在普通对象里的 ref 不会** —— 也就是说同一个 `editor.gridSettings`：
+ *     模板里拿到的可能是**值**，脚本里拿到的可能是**ref 对象**。
+ *
+ *   这个差异极其隐蔽：脚本里拿到 ref 时 `settings.style / size / snap` 全是
+ *   `undefined`，于是"网格设置改了没反应"，而且**不报任何错**
+ *   （本轮实测：改了间距/样式，画布上的网格始终是最初的 32px 方格）。
+ *   ⇒ 这里把两种形态都吃下来，并在解包后走统一的归一化。
+ *
+ *   同时依赖 `settingsRevision`：设置面板改完 → 该 ref 自增 → 本计算属性失效重算，
+ *   否则在面板里改网格、画布不会跟着变。
+ */
+function toGridSettings(value: unknown): CanvasGridSettings {
+  return normalizeCanvasGridSettings(readCanvasExposedValue(value as { value?: unknown }))
+}
+
+const gridSettings = computed<CanvasGridSettings>(() => {
+  settingsRevision.value
+  return toGridSettings(editor.gridSettings)
+})
+
+/**
+ * 舞台的网格背景。
+ *
+ * ★ 网格是**世界坐标**的：间距 × 缩放 = 屏幕间距，视口位移 = 背景偏移 ★
+ *   否则拖动/缩放时网格不动，就成了"卡片在固定纹理上滑"，失去对齐参考的意义。
+ *   换算与判定都收在 `canvas/grid.ts`（纯函数，可单测），这里只做绑定。
+ */
+const stageGridBackground = computed(() => {
+  /**
+   * ★★ 嵌入预览（笔记里的只读画布块）**不画网格** ★★
+   *
+   *  用户要求：「笔记嵌入块中，默认不显示网格线。」
+   *
+   *  理由：嵌入块是**阅读**场景（笔记正文里的一个预览块），
+   *  网格是编辑时的定位辅助。画在笔记里会和笔记自身的行距、分隔线抢视觉，
+   *  变成一片噪声 —— 而嵌入块是只读的，本来也不需要"对齐参考"。
+   *
+   *  实现方式：只是把"要画的样式"换成 none（复用既有的隐藏分支），
+   *  **不动任何能力判定** —— 嵌入块的只读仍然由能力矩阵负责
+   *  （见 canvas-interaction-policy.ts），两者互不干扰。
+   */
+  // 画板度量必须**解包后**再用：`editor.board` 在脚本里可能是 computed 对象
+  // （见 canvas/ref-access.ts），直接读 board.left 会得到 undefined ⇒ 偏移静默变 0
+  const board = {
+    left: readCanvasExposedNumber(editor.board, "left", 0),
+    top: readCanvasExposedNumber(editor.board, "top", 0),
+  }
+
+  if (editor.isEmbedMode) {
+    return resolveCanvasGridBackground({ ...gridSettings.value, style: "none" }, editor.viewport, board)
+  }
+
+  /**
+   * ★ 第三个参数（画板度量）不能省 ★
+   *   节点是按**板坐标**定位的（`translate(world - board.left)`），
+   *   网格背景必须做同样的偏移，否则网格线与卡片的实际位置会错开 ——
+   *   用户报的「吸附的位置和网格显示的位置不一致」就是这个原因。
+   *   推导见 `canvas/grid.ts` 的 `CanvasGridBoard`。
+   */
+  return resolveCanvasGridBackground(gridSettings.value, editor.viewport, board)
+})
+
+/** 只挑 CSS 认得的字段（`visible` 是给界面用的，别塞进 style） */
+const stageGridCssStyle = computed(() => {
+  const background = stageGridBackground.value
+  return {
+    backgroundImage: background.backgroundImage,
+    backgroundPosition: background.backgroundPosition,
+    backgroundSize: background.backgroundSize,
+  }
+})
+
+function updateGridSettings(patch: Partial<CanvasGridSettings>) {
+  void editor.setCanvasGridSettings(patch)
+}
+
+function toggleGridPopover() {
+  if (gridPopoverOpen.value) {
+    gridPopoverOpen.value = false
+    return
+  }
+  const button = gridButtonRef.value
+  if (button) {
+    const rect = button.getBoundingClientRect()
+    gridPopoverStyle.value = {
+      position: "fixed",
+      top: `${rect.bottom + 6}px`,
+      // 靠右对齐按钮右缘：这个弹层比调色板宽，居中容易顶到窗口右边
+      right: `${Math.max(8, window.innerWidth - rect.right)}px`,
+      zIndex: "10000",
+    }
+  }
+  gridPopoverOpen.value = true
+}
+
+function closeGridPopover(event: PointerEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('[data-testid="toolbar-grid-popover"]')
+    && !target.closest('[data-testid="top-toolbar-grid"]')) {
+    gridPopoverOpen.value = false
+  }
+}
+
 onMounted(() => {
   window.addEventListener("diskcanvas-settings-changed", handleCanvasSettingsChanged)
   document.addEventListener("pointerdown", closeColorThemePopover)
+  document.addEventListener("pointerdown", closeGridPopover)
 })
 
 onBeforeUnmount(() => {
@@ -2290,6 +2607,7 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("diskcanvas-settings-changed", handleCanvasSettingsChanged)
   document.removeEventListener("pointerdown", closeColorThemePopover)
+  document.removeEventListener("pointerdown", closeGridPopover)
   cleanupQueryRuntime()
 })
 
@@ -2593,6 +2911,172 @@ function showHelpDialog() {
   openHelpDialog(t("helpDialogTitle"), shortcuts)
 }
 
+/**
+ * 是否运行在**独立网页**里（由 `standalone.html` 挂载）。
+ *
+ * 只用于界面显隐：独立页里不该再显示「在独立网页中打开」。
+ * 与 `editor.capabilities` 无关 —— 独立页和页签一样是**可编辑**的。
+ */
+const isStandalonePage = computed(() => props.bootstrap?.standalone === true)
+
+/**
+ * 在独立网页里打开当前画布（工具栏「帮助」右侧那个按钮）。
+ *
+ * ★ 为什么是"另开一个页签"而不是"把当前页签换成独立页" ★
+ *   思源页签是宿主布局的一部分，插件改不了它的形态；
+ *   而且用户点这个按钮的意图是"**多**开一个纯粹的编辑窗口"，
+ *   替掉当前页签反而会丢掉思源里的上下文。
+ *
+ * ★ 为什么用 `window.open` 且**不加 `noopener`** ★
+ *   `noopener` 会让新页面拿不到 `window.opener`。而独立页正是靠
+ *   `window.opener.__nebuladiskPlugin` 复用网盘插件的能力（同源，见
+ *   `src/standalone.ts` 的 `readOpenerBridge`）。加了 `noopener`
+ *   等于把网盘能力一起关掉 —— 这是**功能性依赖**，不是安全疏忽：
+ *   两个窗口同源、同属用户自己的思源实例，不存在跨站风险。
+ *
+ * ★ 拿不到 `editor.state.filePath` 时怎么办 ★
+ *   还没保存过的画布没有路径，独立页无从打开 ⇒ 明确提示，不静默失败。
+ */
+function openInStandalonePage() {
+  const filePath = editor.state.filePath
+  if (!filePath) {
+    showMessage(t("standaloneOpenNoPath"), 4000, "error")
+    return
+  }
+
+  const pluginName = (props.plugin as Plugin & { name?: string }).name
+  if (!pluginName) {
+    showMessage(t("standaloneOpenFailed"), 4000, "error")
+    return
+  }
+
+  // 版本参数用于缓存击穿（内核静态响应没有 Cache-Control，只有 Last-Modified）
+  const version = (props.plugin as Plugin & { version?: string }).version
+  const url = buildStandalonePageUrl(pluginName, filePath, version)
+  // 弹窗被浏览器拦截时返回 null —— 要提示，否则用户以为按钮坏了
+  const opened = window.open(url, "_blank")
+  if (!opened) {
+    showMessage(t("standaloneOpenBlocked"), 5000, "error")
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * 画布文件管理窗口（工具栏「独立打开」右侧按钮）
+ * ────────────────────────────────────────────────────────────── */
+
+const fileManagerVisible = ref(false)
+
+function openFileManager() {
+  fileManagerVisible.value = true
+}
+
+/** 打开另一个画布：**在当前页签内切换**（独立页里也走得通，无需新开页签） */
+async function onManagerOpen(path: string) {
+  fileManagerVisible.value = false
+  await editor.openWorkspacePath(path)
+}
+
+/**
+ * 「插入画布」= 把那个画布作为**嵌套画布卡片**放到当前板子上（落点在视口中心）。
+ * 插完就关窗 —— 用户要立刻看到卡片落在哪。
+ */
+async function onManagerInsert(path: string) {
+  fileManagerVisible.value = false
+  await editor.insertCanvasFileNode(path)
+}
+
+/** 插件提供的"最近文件"读写口（独立页里也拿得到） */
+function recentFileBridge() {
+  return props.plugin as Plugin & {
+    rememberRecentCanvas?: (path: string, title?: string) => Promise<void>
+    removeRecentCanvasFile?: (path: string) => Promise<void>
+  }
+}
+
+/**
+ * ★ 改名/改目录后，**当前打开的画布路径必须跟着走** ★
+ *
+ * 不跟的后果很隐蔽：文件已经搬到新路径，编辑器还记着旧路径，
+ * 下一次自动保存会把**旧路径重新写出来** —— 用户看到"改了个名，变成两个文件"。
+ *
+ * 判定用"等于 or 前缀"两种情形，文件改名与目录改名共用这一条路径：
+ *   文件改名 `oldPath` 就是那个文件 ⇒ 相等命中；
+ *   目录改名 `oldPath` 是目录 ⇒ 当前文件路径是它的子路径 ⇒ 前缀命中。
+ */
+function onManagerRenamed(oldPath: string, newPath: string) {
+  const current = String(editor.state.filePath || "")
+  if (!current || !oldPath || !newPath) {
+    return
+  }
+  let next = ""
+  if (current === oldPath) {
+    next = newPath
+  } else if (current.startsWith(`${oldPath}/`)) {
+    next = `${newPath}${current.slice(oldPath.length)}`
+  }
+  if (!next) {
+    return
+  }
+
+  editor.state.filePath = next
+
+  /**
+   * ★ 只有"它本来就在最近文件里"才去改记录 ★
+   *   否则「给一个从没打开过的画布改名」会把**它悄悄塞进最近文件**——
+   *   既是意料之外的副作用，也会多写一次 petal（进而触发宿主插件重载，
+   *   编辑器会闪一下）。没有记录就不动记录。
+   */
+  if (!editor.recentFiles.some((file) => file.path === oldPath)) {
+    return
+  }
+
+  const bridge = recentFileBridge()
+  void bridge.removeRecentCanvasFile?.(oldPath)
+    .then(() => bridge.rememberRecentCanvas?.(next))
+    .then(() => editor.refreshRecentFiles())
+    .catch(() => undefined)
+}
+
+/** 文件/文件夹被删掉 ⇒ 顺手清掉"最近文件"里的死链 */
+function onManagerFileDeleted(path: string) {
+  if (!editor.recentFiles.some((file) => file.path === path)) {
+    return
+  }
+  void recentFileBridge().removeRecentCanvasFile?.(path)
+    .then(() => editor.refreshRecentFiles())
+    .catch(() => undefined)
+}
+
+/**
+ * 管理窗口重新枚举完毕 ⇒ 顺手清掉"最近文件"里**确实已经不存在**的条目。
+ *
+ * ★ 为什么是"逐个问内核"，而不是"不在列表里就算没了" ★
+ *   枚举有 `depthLimit` / `maxNodes` 上限，也会被扫描根范围限制住；
+ *   拿"没出现在列表里"当"文件没了"，会误删**活着**的记录。
+ *   所以这里只信内核的 404（`probeWorkspaceFileExists` 只把 404 判为不存在，
+ *   网络抖动一律返回"未知"并保留）—— 判据唯一，不掺启发式。
+ */
+function onManagerReload() {
+  const roots = resolveCanvasScanRoots(String(editor.defaultCanvasDirectory || ""))
+  const scoped = editor.recentFiles
+    .map((file) => String(file.path || ""))
+    .filter((path) => path && roots.some((root) => path.startsWith(`${root}/`)))
+  if (scoped.length === 0) {
+    return
+  }
+
+  const bridge = recentFileBridge()
+  void findMissingWorkspacePaths(scoped)
+    .then(async (missing) => {
+      if (missing.length === 0) {
+        return
+      }
+      await Promise.all(missing.map((path) => bridge.removeRecentCanvasFile?.(path)))
+      editor.refreshRecentFiles()
+    })
+    .catch(() => undefined)
+}
+
 function getSideLabel(side: string): string {
   switch (side) {
     case "top":
@@ -2890,7 +3374,12 @@ function getNodeHeaderTitle(node: CanvasNode): string {
      * 而 `getResolvedFileNode` 给出的 `kind` 才是类型的事实来源。
      *
      * 兜底：解析尚未完成（异步）时退回原来的文件名，避免抬头空白。
-     * `canvas`（嵌套画布）保持原样 —— 它的标题本身就是有意义的画布名。
+     *
+     * ★ 嵌套画布（`canvas`）也显示类型名（第 35 轮，用户要求「风格与网盘文件块一致」）★
+     *   此前它**没有分支**，直接落到下面 `getNodeTitle` 的兜底 ——
+     *   于是抬头显示的是**文件名**（`未命名43.canvas`），而网盘卡片显示的是
+     *   **类型名**（`网盘文件`）。两张卡片放在一起时抬头语义不一致。
+     *   现在统一：抬头 = 类型名，文件名下移到正文第一行（与网盘卡片同构）。
      */
     const resolvedKind = editor.getFileNodeKind?.(node)
     if (resolvedKind === "nebula") {
@@ -2904,6 +3393,9 @@ function getNodeHeaderTitle(node: CanvasNode): string {
     }
     if (resolvedKind === "block") {
       return t("nodeKindBlock")
+    }
+    if (resolvedKind === "canvas") {
+      return t("canvasFileCardTitle")
     }
 
     return editor.getNodeTitle?.(node)
@@ -2948,7 +3440,20 @@ function shouldShowFileCardHeadline(node: CanvasNode) {
     return false
   }
 
-  return !["block", "image"].includes(editor.getFileNodePreview(node).kind)
+  const kind = editor.getFileNodePreview(node).kind
+  /**
+   * ★ 画布卡片不再在正文里显示标题行（第 35 轮）★
+   *
+   * 「画布文件」这个固定标题已经移到**卡片抬头**（`getNodeHeaderTitle` 的
+   * `canvas` 分支），与网盘卡片（抬头 = 「网盘文件」）结构一致。
+   * 正文只保留两行：文件名（`.file-card__canvas-name`）+ 路径（`.file-card__path-line`）。
+   * ⇒ 这里要让 canvas 走 false，否则会在正文里多渲染一行重复的文件名。
+   */
+  if (kind === "canvas") {
+    return false
+  }
+
+  return !["block", "image"].includes(kind)
 }
 
 function shouldShowFileCardDetail(node: CanvasNode) {
@@ -2966,6 +3471,18 @@ function shouldShowFileCardHelper(node: CanvasNode) {
   }
 
   const preview = editor.getFileNodePreview(node)
+  /**
+   * ★ 画布卡片一律不显示 helper（第 33 轮，用户指定）★
+   *
+   * 用户原话：「删除现在的预览。和 open nested canvas.」
+   * `createCanvasFileTargetPreview` 已经把 canvas 的 helper 置空，这里再挡一次：
+   * 卡片组件用 `v-if="showHelper && preview.helper"` 控制，空串本就不会渲染，
+   * 但**显式声明**能避免将来有人把 helper 文案加回去时"顺手"又露出来。
+   */
+  if (preview.kind === "canvas") {
+    return false
+  }
+
   // 网盘文件（nebula）曾经落到 file 兜底分支，卡片上会多出一行英文
   // 「Double click to open」。用户要求去掉 ⇒ 这里连同 helper 一起不显示。
   if (!preview.helper) {
@@ -2975,12 +3492,17 @@ function shouldShowFileCardHelper(node: CanvasNode) {
   return !["block", "document", "image"].includes(preview.kind)
 }
 
+/**
+ * 画布卡片的 tooltip 用**完整路径**（用户要的三行里最后一行就是路径，
+ * 但卡片宽度有限会被省略号截断；悬停看全更有用）。
+ */
 function getFileCardTooltip(node: CanvasNode): string | undefined {
   if (node.type !== "file") {
     return undefined
   }
 
-  return editor.getFileNodePreview(node).detail || undefined
+  const preview = editor.getFileNodePreview(node)
+  return preview.pathLine || preview.detail || undefined
 }
 
 function getFileCardDocumentPreviewHtml(node: CanvasNode): string {

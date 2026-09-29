@@ -223,7 +223,8 @@ watch(query, (value, previous) => {
 .canvas-dialog-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  /* 必须高于 `.canvas-toolbar`（z-index: 10），否则模态框顶部被工具栏盖住 */
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: center;
