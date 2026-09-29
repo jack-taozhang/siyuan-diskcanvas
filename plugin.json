@@ -2,7 +2,7 @@
   "name": "siyuan-diskcanvas",
   "author": "zhangtao",
   "url": "https://github.com/jack-taozhang/siyuan-diskcanvas",
-  "version": "0.2.20",
+  "version": "0.2.23",
   "minAppVersion": "2.10.14",
   "disabledInPublish": true,
   "backends": [

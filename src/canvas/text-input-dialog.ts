@@ -1,4 +1,5 @@
 import { Dialog } from "siyuan"
+import { raiseDialogAboveCanvasModals } from "@/canvas/host-dialog-layer"
 
 interface TextInputDialogOptions {
   cancelLabel: string
@@ -46,6 +47,9 @@ export function openTextInputDialog(options: TextInputDialogOptions): Promise<st
         resolve(null)
       },
     })
+
+    // ★ 必须紧跟构造之后：否则弹窗会被画布自己的模态框（backdrop z-index: 40）盖住。
+    raiseDialogAboveCanvasModals(dialog.element as HTMLElement | undefined)
 
     const input = dialog.element.querySelector("[data-canvas-dialog-input]") as HTMLInputElement | null
     const cancelButton = dialog.element.querySelector("[data-canvas-dialog-cancel]") as HTMLButtonElement | null
