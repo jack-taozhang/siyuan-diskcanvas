@@ -1,6 +1,6 @@
 {
   "name": "siyuan-diskcanvas-next",
-  "version": "0.1.0",
+  "version": "0.2.4",
   "type": "module",
   "description": "SiYuan canvas workspace: NebulaDisk files + notes on an infinite canvas",
   "author": "zhangtao",
@@ -18,9 +18,10 @@
     "check:embed-slash": "node tools/check-embed-interactive-slash.mjs",
     "check:load": "node .verify/load.cjs",
     "verify:e2e": "vite build --config verify.vite.config.ts && node verify-run.cjs",
-    "verify": "npm run check:refs && npm run check:host && npm run check:editor-refs && npm run check:nebula-open && npm run check:asset-insert && npm run check:embed-style && npm run check:embed-slash && npm run build && npm run check:load && npm run verify:e2e",
+    "verify": "npm run check:version && npm run check:refs && npm run check:host && npm run check:editor-refs && npm run check:nebula-open && npm run check:asset-insert && npm run check:embed-style && npm run check:embed-slash && npm run build && npm run check:load && npm run verify:e2e",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:version": "node tools/check-version-sync.mjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",
