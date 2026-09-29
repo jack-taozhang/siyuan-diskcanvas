@@ -1,0 +1,162 @@
+import {
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest"
+
+import { resolveCanvasFileTarget } from "@/canvas/file-target-resolution"
+
+describe("resolveCanvasFileTarget", () => {
+  it("resolves a block id to a block target before falling back to document lookup", async () => {
+    const result = await resolveCanvasFileTarget("20260412094047-ihhbskn", {
+      resolveBlockById: vi.fn(async () => ({
+        hpath: "/Projects/Roadmap",
+        id: "20260412094047-ihhbskn",
+        kind: "block",
+        path: "/data/roadmap.sy",
+        rootId: "20260408235000-root",
+        title: "Picture block",
+      })),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => ({
+        blockId: "20260412094047-ihhbskn",
+        kind: "image",
+        openPath: "/data/assets/example.png",
+        path: "assets/example.png",
+        title: "example.png",
+      })),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("block")
+    expect(result.path).toBe("/data/roadmap.sy")
+  })
+
+  it("resolves an image block id to an image target while preserving the source block id", async () => {
+    const result = await resolveCanvasFileTarget("20260412094047-imgroad", {
+      resolveBlockById: vi.fn(async () => ({
+        hpath: "/Projects/Roadmap",
+        id: "20260412094047-imgroad",
+        kind: "block",
+        path: "/data/roadmap.sy",
+        rootId: "20260408235000-root",
+        title: "Diagram",
+        type: "I",
+      })),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => ({
+        blockId: "20260412094047-imgroad",
+        kind: "image",
+        openPath: "/data/assets/diagram.png",
+        path: "assets/diagram.png",
+        title: "Diagram",
+      })),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result).toEqual({
+      blockId: "20260412094047-imgroad",
+      kind: "image",
+      openPath: "/data/assets/diagram.png",
+      path: "assets/diagram.png",
+      title: "Diagram",
+    })
+  })
+
+  it("resolves a .canvas path before document lookup", async () => {
+    const result = await resolveCanvasFileTarget("/data/storage/maps/roadmap.canvas", {
+      resolveBlockById: vi.fn(async () => null),
+      resolveCanvasByPath: vi.fn(async (path) => ({
+        kind: "canvas",
+        path,
+        title: "roadmap.canvas",
+      })),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => null),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("canvas")
+    expect(result.title).toBe("roadmap.canvas")
+  })
+
+  it("resolves raw image markdown by the embedded block id before falling back to path parsing", async () => {
+    const result = await resolveCanvasFileTarget(`![Diagram](assets/diagram.png)
+{: id="20260412094047-ihhbskn"}`, {
+      resolveBlockById: vi.fn(async () => ({
+        hpath: "/Projects/Roadmap",
+        id: "20260412094047-ihhbskn",
+        kind: "block",
+        path: "/data/roadmap.sy",
+        rootId: "20260408235000-root",
+        title: "Diagram",
+      })),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => ({
+        blockId: "20260412094047-ihhbskn",
+        kind: "image",
+        openPath: "/data/assets/diagram.png",
+        path: "assets/diagram.png",
+        title: "Diagram",
+      })),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("image")
+    expect(result.path).toBe("assets/diagram.png")
+  })
+
+  it("falls back to a direct image target for workspace image paths", async () => {
+    const result = await resolveCanvasFileTarget("/data/storage/maps/roadmap.assets/pasted.png", {
+      resolveBlockById: vi.fn(async () => null),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => null),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("image")
+    expect(result.openPath).toBe("/data/storage/maps/roadmap.assets/pasted.png")
+    expect(result.path).toBe("/data/storage/maps/roadmap.assets/pasted.png")
+  })
+
+  it("falls back to a generic file target when no Siyuan target is found", async () => {
+    const result = await resolveCanvasFileTarget("notes/legacy.md", {
+      resolveBlockById: vi.fn(async () => null),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => null),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("file")
+    expect(result.title).toBe("legacy.md")
+    expect(result.path).toBe("notes/legacy.md")
+  })
+
+  it("falls back to a document target for a block id when all lookups return null", async () => {
+    const result = await resolveCanvasFileTarget("20260919113430-rg8m7ll", {
+      resolveBlockById: vi.fn(async () => null),
+      resolveCanvasByPath: vi.fn(async () => null),
+      resolveDocumentByBlockId: vi.fn(async () => null),
+      resolveDocumentByPath: vi.fn(async () => null),
+      resolveImageByBlockId: vi.fn(async () => null),
+      resolveImageByPath: vi.fn(async () => null),
+    })
+
+    expect(result.kind).toBe("document")
+    expect(result.id).toBe("20260919113430-rg8m7ll")
+    expect(result.title).toBe("20260919113430-rg8m7ll")
+    expect(result.path).toBe("20260919113430-rg8m7ll")
+  })
+})

@@ -1,0 +1,611 @@
+import type { Ref } from "vue"
+import type { CanvasEditorState } from "@/canvas/editor-state"
+import type {
+  CanvasPluginSettings,
+  CanvasRecentFile,
+  CanvasRecentFileSource,
+} from "@/canvas/plugin-data"
+import type {
+  CanvasEditorFileSource,
+  CanvasI18nTranslator,
+  CanvasPluginBridge,
+} from "@/canvas/use-canvas-editor-shared"
+
+import {
+  showMessage,
+} from "siyuan"
+import { openConfirmDialog } from "@/canvas/confirm-dialog"
+import { createEmptyCanvasDocument } from "@/canvas/document"
+import {
+  parseCanvasDocument,
+  stringifyCanvasDocument,
+} from "@/canvas/format"
+import {
+  getSelectedLocalPath,
+  localPathExists,
+  readLocalFileText,
+  writeLocalFileText,
+} from "@/canvas/local-file-system"
+import { openTextInputDialog } from "@/canvas/text-input-dialog"
+import { getCanvasFileName } from "@/canvas/use-canvas-editor-shared"
+import { createDebugLog } from "@/canvas/debug-log"
+import { CANVAS_EMBED_REFRESH_EVENT, type CanvasEmbedRefreshEventDetail } from "@/canvas/canvas-embed-insert"
+import {
+  createCanvasPngExportFilename,
+  exportCanvasWorldToPng,
+  resolveCanvasPngExportBackground,
+  resolveCanvasPngExportBounds,
+  type CanvasPngExportOptions,
+} from "@/canvas/png-export"
+import {
+  type CanvasBoardMetrics,
+  toBoardX,
+  toBoardY,
+} from "@/canvas/board"
+
+interface CanvasEditorFileActionOptions {
+  board: Ref<CanvasBoardMetrics>
+  fileInputRef: Ref<HTMLInputElement | undefined>
+  fileSource: Ref<CanvasEditorFileSource>
+  getPluginSettings: () => CanvasPluginSettings
+  plugin: CanvasPluginBridge
+  refreshRecentFiles: () => void
+  refreshWorkspaceDocuments: () => Promise<void>
+  resetViewport: () => void
+  stageRef: Ref<HTMLElement | undefined>
+  state: CanvasEditorState
+  suggestedFilename: Ref<string>
+  t: CanvasI18nTranslator
+  viewport: {
+    scale: number
+    x: number
+    y: number
+  }
+}
+
+interface ResolvedSaveTarget {
+  path: string
+  sourceType: CanvasRecentFileSource
+}
+
+function normalizeWorkspaceCanvasPath(input: string, baseDirectory: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return ""
+  }
+
+  if (/^[a-zA-Z]:[/\\]/.test(trimmed) || /^[/\\]+[a-zA-Z]:/.test(trimmed) || trimmed.startsWith('file://')) {
+    const cleaned = trimmed.replace(/^[/\\]+([a-zA-Z]:)/, '$1')
+    return cleaned.endsWith(".canvas") ? cleaned : `${cleaned}.canvas`
+  }
+
+  const normalized = trimmed.endsWith(".canvas") ? trimmed : `${trimmed}.canvas`
+  if (normalized.startsWith('/') || normalized.startsWith('data/') || (baseDirectory && normalized.startsWith(baseDirectory))) {
+    return normalized
+  }
+  return `${baseDirectory}/${normalized}`
+}
+
+function sanitizeCanvasFileName(name: string): string {
+  return name
+    .replace(/[\\/:*?"'<>|]/g, "_")
+    .replace(/[~[\]()!&{}=#%;$]/g, "")
+    .replace(/[\x00-\x1f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.+$/, "")
+}
+
+async function workspacePathExists(path: string): Promise<boolean> {
+  const response = await fetch("/api/file/getFile", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path }),
+  })
+
+  return response.status === 200
+}
+
+function dispatchCanvasEmbedRefresh(path: string): void {
+  window.dispatchEvent(new CustomEvent<CanvasEmbedRefreshEventDetail>(CANVAS_EMBED_REFRESH_EVENT, {
+    detail: { path },
+  }))
+}
+
+export function createCanvasEditorFileActions(options: CanvasEditorFileActionOptions) {
+  const {
+    board,
+    fileInputRef,
+    fileSource,
+    getPluginSettings,
+    plugin,
+    refreshRecentFiles,
+    refreshWorkspaceDocuments,
+    resetViewport,
+    stageRef,
+    state,
+    suggestedFilename,
+    t,
+    viewport,
+  } = options
+
+  const debugLog = createDebugLog(getPluginSettings)
+
+  function defaultDirectory(): string {
+    return getPluginSettings().defaultCanvasDirectory
+  }
+
+  function ensureCanvasPath(input: string): string {
+    return normalizeWorkspaceCanvasPath(input, defaultDirectory())
+  }
+
+  async function confirmUnsavedChanges(): Promise<boolean> {
+    if (!state.isDirty) return true
+    return openConfirmDialog(
+      t("confirmUnsavedChangesTitle"),
+      t("confirmUnsavedChangesDescription"),
+    )
+  }
+
+  async function rememberRecentPath(path: string, sourceType: CanvasRecentFileSource) {
+    await plugin.rememberRecentCanvas?.(path, getCanvasFileName(path), sourceType)
+    refreshRecentFiles()
+  }
+
+  async function nextUntitledName(): Promise<string> {
+    const dir = defaultDirectory()
+    const baseName = t("untitledCanvas").replace(/\.canvas$/i, "")
+    const first = `${baseName}.canvas`
+    if (!await workspacePathExists(`${dir}/${first}`)) return first
+    for (let i = 2; i <= 99; i++) {
+      const candidate = `${baseName}-${i}.canvas`
+      if (!await workspacePathExists(`${dir}/${candidate}`)) return candidate
+    }
+    return first
+  }
+
+  async function newCanvas() {
+    if (!await confirmUnsavedChanges()) return
+    state.replaceDocument(createEmptyCanvasDocument(), "")
+    suggestedFilename.value = await nextUntitledName()
+    fileSource.value = "unsaved"
+    resetViewport()
+  }
+
+  async function openWorkspacePath(path: string) {
+    if (!await confirmUnsavedChanges()) return
+    try {
+      await state.open(path)
+      suggestedFilename.value = getCanvasFileName(path)
+      fileSource.value = "workspace"
+      await rememberRecentPath(path, "workspace")
+      resetViewport()
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : t("messageUnableOpenCanvasFile"), 4000, "error")
+    }
+  }
+
+  async function openLocalPath(path: string, fallbackTitle?: string) {
+    if (!await confirmUnsavedChanges()) return
+    try {
+      const raw = await readLocalFileText(path)
+      const parsed = parseCanvasDocument(raw)
+      if (!parsed.document) {
+        showMessage(parsed.errors[0]?.message || t("messageInvalidCanvasFile"), 4000, "error")
+        return
+      }
+
+      suggestedFilename.value = fallbackTitle || getCanvasFileName(path)
+      state.replaceDocument(parsed.document, path, { raw })
+      state.issues = {
+        errors: parsed.errors,
+        warnings: parsed.warnings,
+      }
+      fileSource.value = "local"
+      await rememberRecentPath(path, "local")
+      resetViewport()
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : t("messageUnableOpenLocalCanvasFile"), 4000, "error")
+    }
+  }
+
+  async function openPath() {
+    const input = await openTextInputDialog({
+      cancelLabel: t("dialogCancel"),
+      confirmLabel: t("dialogConfirm"),
+      initialValue: state.filePath && fileSource.value === "workspace"
+        ? state.filePath
+        : `${defaultDirectory()}/${t("untitledCanvas")}`,
+      title: t("promptWorkspacePath"),
+    })
+    const path = ensureCanvasPath(input || "")
+    if (!path) {
+      return
+    }
+
+    await openWorkspacePath(path)
+  }
+
+  function triggerImport() {
+    fileInputRef.value?.click()
+  }
+
+  async function importCanvas(file: File) {
+    const raw = await file.text()
+    const parsed = parseCanvasDocument(raw)
+    if (!parsed.document) {
+      showMessage(parsed.errors[0]?.message || t("messageInvalidCanvasFile"), 4000, "error")
+      return
+    }
+
+    const localPath = getSelectedLocalPath(file)
+    const title = file.name || getCanvasFileName(localPath)
+    suggestedFilename.value = sanitizeCanvasFileName(title) || title
+    state.replaceDocument(parsed.document, localPath, { raw })
+    state.issues = {
+      errors: parsed.errors,
+      warnings: parsed.warnings,
+    }
+    fileSource.value = localPath ? "local" : "unsaved"
+
+    if (localPath) {
+      await rememberRecentPath(localPath, "local")
+    }
+
+    resetViewport()
+  }
+
+  function getDefaultSaveTarget(): ResolvedSaveTarget {
+    if (fileSource.value === "local" && state.filePath) {
+      return {
+        path: state.filePath,
+        sourceType: "local",
+      }
+    }
+
+    return {
+      path: state.filePath && fileSource.value === "workspace"
+        ? state.filePath
+        : `${defaultDirectory()}/${suggestedFilename.value || t("untitledCanvas")}`,
+      sourceType: "workspace",
+    }
+  }
+
+  async function resolveSaveTarget(): Promise<ResolvedSaveTarget | null> {
+    const defaults = getDefaultSaveTarget()
+    debugLog("resolveSaveTarget: defaults =", JSON.stringify(defaults))
+    debugLog("resolveSaveTarget: state.filePath =", state.filePath)
+    debugLog("resolveSaveTarget: fileSource.value =", fileSource.value)
+    debugLog("resolveSaveTarget: defaultDirectory() =", defaultDirectory())
+    let candidate = getCanvasFileName(defaults.path).replace(/\.canvas$/i, "")
+    debugLog("resolveSaveTarget: candidate (filename) =", candidate)
+
+    while (true) {
+      const input = await openTextInputDialog({
+        cancelLabel: t("dialogCancel"),
+        confirmLabel: t("dialogSave"),
+        initialValue: candidate,
+        title: t("promptCanvasSavePath"),
+      })
+      const rawName = sanitizeCanvasFileName((input || "").trim().split(/[/\\]/).pop() || "").replace(/\.canvas$/i, "")
+      debugLog("resolveSaveTarget: user input =", JSON.stringify(input), "→ sanitized name =", JSON.stringify(rawName))
+      if (!rawName) {
+        return null
+      }
+      const dirPath = defaults.sourceType === "local" && state.filePath
+        ? state.filePath.replace(/[/\\][^/\\]+$/, "")
+        : defaultDirectory()
+      const sep = dirPath.includes("\\") ? "\\" : "/"
+      const targetPath = `${dirPath}${sep}${rawName}.canvas`
+      debugLog("resolveSaveTarget: dirPath =", dirPath)
+      debugLog("resolveSaveTarget: targetPath =", targetPath)
+      const target: ResolvedSaveTarget = {
+        path: targetPath,
+        sourceType: defaults.sourceType,
+      }
+
+      const isCurrentPath = target.path === state.filePath && target.sourceType === fileSource.value
+      debugLog("resolveSaveTarget: isCurrentPath =", isCurrentPath)
+      const exists = target.sourceType === "local"
+        ? await localPathExists(target.path)
+        : await workspacePathExists(target.path)
+      debugLog("resolveSaveTarget: exists =", exists)
+
+      if (exists && !isCurrentPath) {
+        const overwrite = await openConfirmDialog(
+          t("confirmOverwriteCanvasTitle"),
+          t("confirmOverwriteCanvasDescription", { path: target.path }),
+        )
+        if (!overwrite) {
+          candidate = rawName
+          continue
+        }
+      }
+
+      return target
+    }
+  }
+
+  async function saveLocal(path: string) {
+    const raw = stringifyCanvasDocument(state.document)
+    await writeLocalFileText(path, raw)
+    state.filePath = path
+    state.isDirty = false
+    state.lastSavedRaw = raw
+    state.conflict = null
+    suggestedFilename.value = getCanvasFileName(path)
+    fileSource.value = "local"
+    await rememberRecentPath(path, "local")
+  }
+
+  async function saveWorkspace(path: string) {
+    await state.save(path, {
+      detectExternalChanges: getPluginSettings().detectExternalChanges,
+    })
+    dispatchCanvasEmbedRefresh(path)
+    suggestedFilename.value = getCanvasFileName(path)
+    fileSource.value = "workspace"
+    await rememberRecentPath(path, "workspace")
+    await refreshWorkspaceDocuments()
+  }
+
+  async function save() {
+    const target = await resolveSaveTarget()
+    if (!target) {
+      debugLog("save: user cancelled")
+      return
+    }
+    debugLog("save: target =", JSON.stringify(target))
+
+    try {
+      if (target.sourceType === "local") {
+        debugLog("save: calling saveLocal(", target.path, ")")
+        await saveLocal(target.path)
+        return
+      }
+
+      debugLog("save: calling saveWorkspace(", target.path, ")")
+      await saveWorkspace(target.path)
+    } catch (error) {
+      debugLog("save: error caught", error)
+      if (state.conflict) {
+        showMessage(t("messageCanvasFileChangedOnDisk"), 5000, "error")
+        return
+      }
+
+      showMessage(
+        error instanceof Error
+          ? error.message
+          : target.sourceType === "local"
+            ? t("messageUnableSaveLocalCanvasFile")
+            : t("messageUnableSaveCanvas"),
+        4000,
+        "error",
+      )
+    }
+  }
+
+  // 静默保存仅写盘并同步状态，跳过内嵌预览刷新 / 最近文件 / 工作区树重读，
+  // 避免触发宿主侧文档 reload 与重布局导致的「跳转页面再刷新」闪烁
+  async function silentSaveLocal(path: string) {
+    const raw = stringifyCanvasDocument(state.document)
+    await writeLocalFileText(path, raw)
+    state.filePath = path
+    state.isDirty = false
+    state.lastSavedRaw = raw
+    state.conflict = null
+  }
+
+  async function silentSaveWorkspace(path: string) {
+    await state.save(path, {
+      direct: true,
+    })
+  }
+
+  async function silentSave() {
+    if (!state.filePath) {
+      return
+    }
+
+    try {
+      if (fileSource.value === "local") {
+        await silentSaveLocal(state.filePath)
+      } else {
+        await silentSaveWorkspace(state.filePath)
+      }
+    } catch {
+      // 自动保存失败静默处理，不干扰用户编辑
+    }
+  }
+
+  async function openRecentFile(recent: CanvasRecentFile) {
+    if (recent.sourceType === "local") {
+      await openLocalPath(recent.path, recent.title)
+      return
+    }
+
+    await openWorkspacePath(recent.path)
+  }
+
+  async function openRecentPath(path: string) {
+    await openWorkspacePath(path)
+  }
+
+  async function overwriteConflictVersion() {
+    if (!state.filePath) {
+      return
+    }
+
+    try {
+      await state.save(state.filePath, {
+        detectExternalChanges: getPluginSettings().detectExternalChanges,
+        force: true,
+      })
+      dispatchCanvasEmbedRefresh(state.filePath)
+      await rememberRecentPath(state.filePath, "workspace")
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : t("messageUnableOverwriteDiskVersion"), 4000, "error")
+    }
+  }
+
+  function loadConflictVersion() {
+    const conflictPath = state.conflict?.path || state.filePath
+    state.loadConflictVersion()
+    suggestedFilename.value = getCanvasFileName(conflictPath)
+    fileSource.value = "workspace"
+  }
+
+  function openSettings() {
+    plugin.openCanvasSettings?.()
+  }
+
+  function exportCanvas() {
+    const blob = new Blob([`${JSON.stringify(state.document, null, "\t")}\n`], {
+      type: "application/json",
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = suggestedFilename.value || getCanvasFileName(state.filePath) || "canvas-export.canvas"
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /**
+   * 从磁盘重新载入当前画布（工具栏「刷新」按钮）。
+   *
+   * ★ 与 `openWorkspacePath` 的区别 ★
+   *   `openWorkspacePath` 是"打开另一个文件"：要确认未保存改动、要记最近文件、要重置视口。
+   *   刷新是"重新读同一个文件"：**不**确认（用户已明确要求丢弃内存状态）、
+   *   **不**动最近文件、**不**重置视口（保持当前观看位置）。
+   *
+   * 同一条 .canvas 可能被别的实例（页签/嵌入块）改过，刷新就是把这个外部改动拉进来。
+   */
+  async function reloadFromDisk() {
+    const path = state.filePath
+    if (!path) {
+      showMessage(t("messageCanvasReloadNoFile"), 3000, "info")
+      return
+    }
+
+    try {
+      if (fileSource.value === "workspace") {
+        await state.open(path)
+      } else {
+        const raw = await readLocalFileText(path)
+        const parsed = parseCanvasDocument(raw)
+        if (!parsed.document) {
+          showMessage(parsed.errors[0]?.message || t("messageInvalidCanvasFile"), 4000, "error")
+          return
+        }
+        state.replaceDocument(parsed.document, path, { raw })
+        state.issues = {
+          errors: parsed.errors,
+          warnings: parsed.warnings,
+        }
+      }
+      showMessage(t("messageCanvasReloaded"), 2000)
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : t("messageUnableOpenCanvasFile"), 4000, "error")
+    }
+  }
+
+  /**
+   * 把画布导出为 PNG 图片。
+   *
+   * ★ 第 11 轮恢复 ★
+   *   本函数随上游业务层被剥离过（`png-export.ts` 整模块进了 `.stripped/`），
+   *   但它的调用链（`use-canvas-editor` 的解构 + 再导出）一直留着 ——
+   *   更糟的是返回对象里**没有这个键**，于是 `editor.exportCanvasPng` 实际是 `undefined`，
+   *   `tsconfig strict:false` 把这个问题掩盖了。
+   *   现已从 `.baseline/src-v150` 忠实移植回来，并补回 `png-export.ts`。
+   *
+   * `range === "full"` 时要把画布坐标换算成"板"坐标（toBoardX/Y）——
+   * 因为 `exportCanvasWorldToPng` 是按 world 元素的实际像素边界裁切的。
+   */
+  async function exportCanvasPng(options: CanvasPngExportOptions) {
+    const stage = stageRef.value
+    const world = stage?.querySelector<HTMLElement>(".stage__world")
+    if (!stage || !world) {
+      console.error("[Canvas PNG Export] stage or world element not found", { stage: !!stage, world: !!world })
+      showMessage(t("messageCanvasPngExportFailed"), 4000, "error")
+      return
+    }
+
+    const bounds = resolveCanvasPngExportBounds({
+      nodes: state.document.nodes,
+      padding: 48,
+      range: options.range,
+      stageSize: {
+        height: stage.clientHeight,
+        width: stage.clientWidth,
+      },
+      viewport: {
+        scale: viewport.scale,
+        x: viewport.x,
+        y: viewport.y,
+      },
+    })
+    const exportBounds = options.range === "full"
+      ? {
+          ...bounds,
+          x: toBoardX(board.value, bounds.x),
+          y: toBoardY(board.value, bounds.y),
+        }
+      : bounds
+    const iframeCount = world.querySelectorAll("iframe").length
+    const filename = createCanvasPngExportFilename(suggestedFilename.value || state.filePath)
+
+    debugLog("[Canvas PNG Export] starting export", {
+      background: options.background,
+      bounds: exportBounds,
+      filename,
+      iframeCount,
+      nodeCount: state.document.nodes.length,
+      range: options.range,
+      worldSize: { h: world.offsetHeight, w: world.offsetWidth },
+    })
+
+    if (iframeCount > 0) {
+      debugLog("[Canvas PNG Export] world contains iframe nodes; they will be excluded from export", {
+        iframeCount,
+      })
+    }
+
+    try {
+      await exportCanvasWorldToPng({
+        backgroundColor: resolveCanvasPngExportBackground(options.background),
+        bounds: exportBounds,
+        filename,
+        world,
+      })
+      debugLog("[Canvas PNG Export] completed successfully")
+    } catch (error) {
+      console.error("[Canvas PNG Export] failed", error)
+      const message = error instanceof Error ? error.message : String(error)
+      showMessage(message || t("messageCanvasPngExportFailed"), 4000, "error")
+    }
+  }
+
+  return {
+    ensureCanvasPath,
+    exportCanvas,
+    exportCanvasPng,
+    importCanvas,
+    loadConflictVersion,
+    newCanvas,
+    openPath,
+    openRecentFile,
+    openRecentPath,
+    openSettings,
+    openWorkspacePath,
+    overwriteConflictVersion,
+    reloadFromDisk,
+    rememberRecentPath,
+    save,
+    silentSave,
+    triggerImport,
+  }
+}

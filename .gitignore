@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dev/
+package.zip
+
+# 验证/调试产物（★ .verify/ 里含真实 NAS 凭据与 Chrome 配置，绝不可入库 ★）
+.verify/
+_verify/
+_verify-dist/
+_verify-chrome-profile/
+_dist-old*/
+
+# 从上游裁剪出来的参考快照（不是本仓库的源码，不发布）
+.baseline/
+.stripped/
+
+# Python 编译产物（语法检查会生成）
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地密钥（真实值放这里，仓库里只放 *.example）
+.env.local
+.env.*.local
+tools/.nb-local.json
+
+*.log

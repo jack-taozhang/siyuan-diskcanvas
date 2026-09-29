@@ -1,0 +1,554 @@
+.canvas-embed-preview {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease;
+}
+
+.canvas-embed-preview:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+.canvas-embed-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.canvas-embed-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(91, 141, 239, 0.85);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.canvas-embed-title {
+  display: block;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--b3-theme-on-background);
+  background: var(--b3-theme-background);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diskcanvas__mobile-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: calc(100vh - 48px);
+  overflow: hidden;
+}
+
+.diskcanvas__tab {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.canvas-text-input-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+}
+
+.canvas-text-input-dialog__input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.canvas-text-input-dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.canvas-ai-search-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+}
+
+.canvas-ai-search-dialog__hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--b3-theme-on-surface);
+  opacity: 0.85;
+}
+
+.canvas-ai-search-dialog__input {
+  width: 100%;
+  min-height: 80px;
+  max-height: 240px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 8px 12px;
+}
+
+.canvas-ai-search-dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.canvas-file-picker {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+}
+
+.canvas-file-picker__input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+
+.canvas-file-picker__list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--b3-border-color);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  min-height: 80px;
+}
+
+.canvas-file-picker__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.canvas-file-picker__item:hover,
+.canvas-file-picker__item--active {
+  background: var(--b3-list-hover);
+}
+
+.canvas-file-picker__item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--b3-theme-on-background);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-file-picker__item-path {
+  font-size: 11px;
+  color: var(--b3-theme-on-surface-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-file-picker__empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--b3-theme-on-surface-light);
+}
+
+.canvas-file-picker__loading {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--b3-theme-on-surface-light);
+}
+
+.canvas-file-picker__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.canvas-file-picker__mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.canvas-file-picker__mode-label {
+  font-size: 12px;
+  color: var(--b3-theme-on-surface);
+}
+
+.canvas-file-picker__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// =============================================================================
+// Canvas 设置页条目布局与尺寸样式：所有设置项（输入框、选择框、开关）单行水平对齐
+// =============================================================================
+.b3-dialog__content .config-item:has([data-setting-key]),
+.diskcanvas-settings-details-content .config-item:has([data-setting-key]),
+.diskcanvas-settings-details-content > .fn__flex:has([data-setting-key]),
+.diskcanvas-settings-details-content > .b3-label:has([data-setting-key]),
+.b3-dialog__content .config-item:has(.b3-text-field),
+.b3-dialog__content .config-item:has(.b3-select),
+.b3-dialog__content .config-item:has(input[type="checkbox"]) {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 12px 16px !important;
+  box-sizing: border-box !important;
+
+  > .fn__flex-1,
+  > .config-item__main {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    margin-bottom: 0 !important;
+    margin-right: 16px !important;
+  }
+
+  .config-name {
+    margin-bottom: 0 !important;
+    line-height: 20px !important;
+    font-size: 14px !important;
+  }
+
+  > .fn__space {
+    display: none !important;
+  }
+}
+
+/* 文本输入框与下拉选择框：固定标准 200px 尺寸靠右水平对齐，严禁换行撑满 */
+.b3-dialog__content .config-item > input[data-setting-key]:not([type="checkbox"]),
+.b3-dialog__content .config-item > select[data-setting-key],
+.b3-dialog__content .config-item > .b3-text-field:not([type="checkbox"]),
+.b3-dialog__content .config-item > .b3-select,
+.diskcanvas-settings-details-content input[data-setting-key]:not([type="checkbox"]),
+.diskcanvas-settings-details-content select[data-setting-key] {
+  flex: 0 0 200px !important;
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  box-sizing: border-box !important;
+  align-self: center !important;
+}
+
+.b3-dialog__content .config-item input[data-setting-key][type="checkbox"],
+.b3-dialog__content input[data-setting-key][type="checkbox"],
+.diskcanvas-settings-details-content input[data-setting-key][type="checkbox"],
+input[data-setting-key][type="checkbox"].fn__size200,
+input.b3-switch,
+input[data-setting-key][type="checkbox"] {
+  position: relative !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 26px !important;
+  min-width: 26px !important;
+  max-width: 26px !important;
+  height: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  flex: 0 0 26px !important;
+  box-sizing: border-box !important;
+  background-color: var(--b3-switch-background, #e1e3e1) !important;
+  border: 1px solid var(--b3-switch-border, rgba(120, 120, 128, 0.3)) !important;
+  border-radius: 12px !important;
+  outline: none !important;
+  cursor: pointer !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease !important;
+  display: inline-block !important;
+  margin: 0 !important;
+}
+
+.b3-dialog__content input[data-setting-key][type="checkbox"]:checked,
+input.b3-switch:checked,
+input[data-setting-key][type="checkbox"]:checked {
+  background-color: var(--b3-switch-checked-background, var(--b3-theme-primary, #3575f0)) !important;
+  border-color: transparent !important;
+}
+
+.b3-dialog__content input[data-setting-key][type="checkbox"]::after,
+input.b3-switch::after,
+input[data-setting-key][type="checkbox"]::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 7px !important;
+  transform: translate(-50%, -50%) !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background-color: var(--b3-switch-border, rgba(0, 0, 0, 0.4)) !important;
+  transition: left 0.12s ease, width 0.12s ease, height 0.12s ease, background-color 0.12s ease !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+}
+
+.b3-dialog__content input[data-setting-key][type="checkbox"]:checked::after,
+input.b3-switch:checked::after,
+input[data-setting-key][type="checkbox"]:checked::after {
+  left: 17px !important;
+  width: 12px !important;
+  height: 12px !important;
+  background-color: var(--b3-switch-checked, #ffffff) !important;
+}
+
+
+
+/* ==================================================================
+ * 「画布」自定义块（笔记内嵌）—— 样式对齐网盘文件嵌入
+ *
+ * 参照物：siyuan-nebuladisk 的 `.nb-embed` 家族（index.css:508-670）。
+ * 类名一一对应，只换前缀 `nb-` → `dc-`，便于两边对照维护：
+ *   .nb-embed           ↔ .dc-embed
+ *   .nb-embed-head      ↔ .dc-embed-head
+ *   .nb-embed-title     ↔ .dc-embed-title
+ *   .nb-embed-tools     ↔ .dc-embed-tools
+ *   .nb-embed-btn       ↔ .dc-embed-btn
+ *   .nb-embed-frame-box ↔ .dc-embed-frame-box
+ *
+ * ★ 关键尺寸必须与网盘侧逐字一致（用户要求「相同尺寸」）★
+ *   预览区高度：clamp(300px, 58vh, 620px)、min-height: 300px
+ *   头部高度  ：min-height: 26px、单行不换行
+ *   改这边时请同步核对网盘侧，避免两边长得不一样。
+ * ================================================================== */
+
+.dc-embed-host {
+  display: block;
+}
+
+/**
+ * ★ 藏掉思源给自定义块准备的「占位 <pre>」★
+ *
+ * 思源渲染自定义块时，`element`（= `.custom-block__content`）里本来躺着一个
+ * `<pre>`（原始 JSON 文本），供「渲染器没接管」时兜底显示。
+ *
+ * 我们的渲染器**绝不能删它**（删了思源就判定块结构损坏 → 无限重渲染 →
+ * 画布反复闪烁；详见 canvas-embed-block.ts 里 render 的注释），
+ * 只能在视觉上藏起来，让 `.dc-embed` 独占版面。
+ *
+ * 用 `>` 直接子选择器限定作用域：
+ *   · 只影响「我们接管的」块（`.dc-embed-host` 下）
+ *   · 不碰用户自己写的、或其他插件块里的 <pre>
+ */
+.dc-embed-host > pre {
+  display: none !important;
+}
+
+.dc-embed {
+  border: 1px solid var(--b3-border-color);
+  border-radius: var(--b3-border-radius);
+  overflow: hidden;
+  margin: 4px 0;
+  background: var(--b3-theme-background);
+  font-size: 13px;
+}
+
+/* 头部：单行、26px、浅色底 + 下边框（与网盘嵌入一致） */
+.dc-embed-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--b3-theme-surface-lighter);
+  border-bottom: 1px solid var(--b3-border-color);
+  flex-wrap: nowrap;
+  min-height: 26px;
+  box-sizing: border-box;
+}
+
+/* 标题必须可收缩（min-width:0），否则 nowrap 下会把工具条顶出可视区 */
+.dc-embed-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dc-embed-title svg {
+  width: 15px;
+  height: 15px;
+  fill: var(--b3-theme-primary);
+  flex-shrink: 0;
+}
+
+.dc-embed-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-embed-path {
+  color: var(--b3-theme-on-surface-light);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dc-embed-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* 按钮：平时弱边框、悬停才高亮 */
+.dc-embed-btn {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--b3-theme-on-surface-light);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.dc-embed-btn:hover {
+  background: var(--b3-list-hover);
+  border-color: var(--b3-border-color);
+  color: var(--b3-theme-on-surface);
+}
+
+.dc-embed-btn--primary {
+  border-color: var(--b3-border-color);
+  color: var(--b3-theme-on-surface);
+}
+
+/* 刷新期间短暂禁用，给出「点到了」的即时反馈 */
+.dc-embed-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ★ 预览区高度：与 .nb-embed-frame-box 逐字一致 ★ */
+.dc-embed-frame-box {
+  height: clamp(300px, 58vh, 620px);
+  min-height: 300px;
+  background: var(--b3-theme-surface);
+  overflow: hidden;
+}
+
+/* 只读预览：SVG 以 data URL 内联，按容器等比适配、居中、留白不变形 */
+.dc-embed-frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* ★ 真实画布宿主：必须「撑满」，不能沿用静态图的居中 + 内边距 ★
+ *
+ *   .dc-embed-frame 的 flex 居中与 10px 内边距是为**静态快照**设计的
+ *   （让它等比居中、四周留白）。真实画布要占满整个预览区 ——
+ *   否则会白白缩掉 20px，且 flex 居中会干扰画布自身的布局计算
+ *   （画布内部按宿主尺寸算 stage 大小与缩放中心）。
+ *
+ *   遮罩/输入交给画布自己处理，这里只保证「有确定的尺寸」。
+ */
+.dc-embed-canvas-host {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 保险：显式让画布外壳撑满宿主（.canvas-shell 自身也是 100%，此处不依赖它） */
+.dc-embed-canvas-host > .canvas-shell {
+  width: 100%;
+  height: 100%;
+}
+
+/* ★ 预览态：纯画布观感 —— 隐藏画布顶部工具栏 ★
+ *
+ * 用户明确要求「需要纯画布观感」。嵌入块的头部已经有「刷新 / 在页签中打开」，
+ * 画布自己的工具栏（新建/保存/撤销/主题…）在预览里没有意义 ——
+ * 保留只会让人误以为能编辑（视觉上给虚假承诺）。
+ * 缩放改由滚轮完成（滚轮本就与只读无关）。
+ *
+ * ★ 注：行为层面工具栏按钮早已被 `capabilities.editDocument` 在 `commitDocument`
+ *   收口处拦住（点不动），这里隐藏它纯粹是为了**观感与真实能力一致**。
+ *
+ * ★ 只写 display:none 是不够的 ★
+ *   `.canvas-shell` 是 `grid-template-rows: auto minmax(0, 1fr)`。
+ *   工具栏一旦 display:none 就从网格里移除，**舞台会替补成为第一个网格项、
+ *   落进 `auto` 那一行** —— 那一行高度由内容决定，而舞台自身是 height:100%，
+ *   于是高度塌陷（表现为"画布变成一条细线"）。
+ *   ⇒ 必须同时把行模板改成单行，让剩下的舞台独占 `minmax(0, 1fr)`。
+ */
+.dc-embed-canvas-host > .canvas-shell {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.dc-embed-canvas-host .canvas-toolbar {
+  display: none !important;
+}
+
+.dc-embed-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+  /* 只读：禁用图片拖拽与文本选中，避免误操作 */
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.dc-embed-hint {
+  margin: 0;
+  color: var(--b3-theme-on-surface-light);
+  font-size: 12px;
+}
+
+.dc-embed-hint--error,
+.dc-embed-error {
+  color: var(--b3-theme-error, #d23f31);
+}
+
+.dc-embed-error {
+  padding: 10px 12px;
+  font-size: 12px;
+}

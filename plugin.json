@@ -1,0 +1,40 @@
+{
+  "name": "siyuan-diskcanvas-next",
+  "author": "zhangtao",
+  "url": "https://github.com/jack-taozhang/siyuan-diskcanvas-next",
+  "version": "0.2.4",
+  "minAppVersion": "2.10.14",
+  "disabledInPublish": true,
+  "backends": [
+    "windows",
+    "linux",
+    "darwin",
+    "docker"
+  ],
+  "frontends": [
+    "desktop",
+    "desktop-window",
+    "browser-desktop"
+  ],
+  "displayName": {
+    "default": "DiskCanvas",
+    "zh_CN": "DiskCanvas 盘绘"
+  },
+  "description": {
+    "default": "DiskCanvas gives SiYuan an infinite canvas: lay out netdisk (NebulaDisk) files, SiYuan notes and internal assets side by side, connect them with edges, and export a PNG. Note cards show their title and outline, .canvas files embed into notes as read-only previews, and netdisk files can be dragged straight from the netdisk plugin tree onto the canvas. Reuses the netdisk plugin connection, so there is nothing to configure twice.",
+    "zh_CN": "盘绘给思源加一张无限画布：把网盘（NebulaDisk）文件、思源笔记与内部资源铺在一起，用连线梳理关系，并可一键导出 PNG。笔记卡片默认只显示标题与大纲，.canvas 可作为只读预览块嵌进笔记正文，网盘文件也能从网盘插件文件树直接拖入画布。网盘连接直接复用网盘插件，无需在画布侧重复配置。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README_zh_CN.md"
+  },
+  "icon": "icon.png",
+  "keywords": [
+    "canvas",
+    "画布",
+    "diskcanvas",
+    "nebula",
+    "网盘",
+    "board"
+  ]
+}
