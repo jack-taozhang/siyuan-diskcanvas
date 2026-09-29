@@ -3,6 +3,8 @@ node_modules/
 dist/
 dev/
 package.zip
+# 打包出来的分发 zip（可随时用 npm run pack 重建，不入库）
+dist-package/
 
 # 验证/调试产物（★ .verify/ 里含真实 NAS 凭据与 Chrome 配置，绝不可入库 ★）
 .verify/

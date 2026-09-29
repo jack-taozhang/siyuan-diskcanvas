@@ -11,6 +11,8 @@
     "build": "npm run build:plugin && npm run build:standalone",
     "build:plugin": "vite build",
     "build:standalone": "vite build --config vite.standalone.config.ts",
+    "pack": "node tools/pack.js",
+    "pack:rebuild": "node tools/pack.js --rebuild",
     "check:standalone": "node tools/check-standalone-build.mjs",
     "check:template": "node tools/check-template-identifiers.mjs",
     "check:refs": "node tools/check-broken-refs.mjs",
