@@ -98,6 +98,7 @@
   "selectionToolbarCreateGroup": "Create group",
   "selectionToolbarDelete": "Delete",
   "selectionToolbarEdit": "Edit",
+  "selectionToolbarEditTitle": "Edit card title",
   "selectionToolbarRefresh": "Refresh",
   "selectionToolbarConvert": "Convert to document",
   "selectionToolbarConvertToText": "Convert to text",

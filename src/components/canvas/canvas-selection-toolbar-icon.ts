@@ -18,6 +18,7 @@ export function createSelectionToolbarTooltips(t: CanvasI18nTranslator) {
     createGroup: t('selectionToolbarCreateGroup'),
     delete: t('selectionToolbarDelete'),
     edit: t('selectionToolbarEdit'),
+    editTitle: t('selectionToolbarEditTitle'),
     refresh: t('selectionToolbarRefresh'),
     relayout: t('selectionToolbarRelayout'),
   } as const

@@ -1591,7 +1591,17 @@
   border-bottom: 1px solid var(--canvas-border);
   background: var(--canvas-floating-button-bg);
   color: var(--canvas-text-muted);
-  font-size: 11px;
+  /*
+   * ★ 抬头字号（第 39 轮由 11px 调大）★
+   * 用户原话：「这个文本 字体大小调整大一点」。
+   * 11px 是"辅助说明文字"的量级，压不住卡片标题的位置感；
+   * 13px 与正文形成层次又不喧宾夺主。
+   *
+   * ⚠️ 改这个值会让 header 的实际高度变化 ⇒ 必须同步核对
+   *   `CanvasWorkspace.getLinkIframeStyle` 里的 `headerHeight` 常量
+   *   （它用"节点高度 - 头部高度"反推 bilibili iframe 的可用高度）。
+   */
+  font-size: 13px;
   font-weight: 500;
   flex-shrink: 0;
   cursor: grab;
@@ -1603,6 +1613,12 @@
 
 .canvas-node__header:active {
   cursor: grabbing;
+}
+
+/* 编辑抬头时整条头部的光标要变成文本态，否则会误导成"还能拖动" */
+.canvas-node__header--editing,
+.canvas-node__header--editing:active {
+  cursor: text;
 }
 
 .canvas-node--selected .canvas-node__header {
@@ -1619,6 +1635,38 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/**
+ * 抬头就地编辑的输入框（第 39 轮）。
+ *
+ * ★ 为什么要显式覆盖 user-select / cursor ★
+ *   父级 `.canvas-node__header` 为了当拖拽手柄设了 `user-select: none`，
+ *   继承下来会导致输入框里**选不中文字**（虽然能输入）。
+ *   指针事件则由模板上的 `@pointerdown.stop` 挡住（否则一点就被拖走）。
+ */
+.canvas-node__header-input {
+  flex: 1;
+  min-width: 0;
+  margin: -2px 0;
+  padding: 2px 6px;
+  border: 1px solid var(--canvas-accent);
+  border-radius: 5px;
+  background: var(--canvas-floating-bg, var(--b3-theme-surface));
+  color: var(--canvas-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  outline: none;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.canvas-node__header-input::placeholder {
+  color: var(--canvas-text-muted);
+  opacity: 0.7;
 }
 
 /* ★ 抬头里的类型徽标（第 20 轮）：与抬头同行、靠右，收缩时不挤掉标题 ★ */

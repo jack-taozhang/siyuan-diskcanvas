@@ -98,6 +98,7 @@
   "selectionToolbarCreateGroup": "创建分组",
   "selectionToolbarDelete": "删除",
   "selectionToolbarEdit": "编辑",
+  "selectionToolbarEditTitle": "编辑卡片标题",
   "selectionToolbarRefresh": "刷新",
   "selectionToolbarConvert": "转为文档",
   "selectionToolbarConvertToText": "转为文本",

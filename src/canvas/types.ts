@@ -30,6 +30,17 @@ export interface CanvasNodeBase {
   color?: string
   /** 描边样式（虚线）。缺省 = 实线。见 CanvasLineStyle。 */
   lineStyle?: CanvasLineStyle
+  /**
+   * ★ 用户自定义的卡片抬头文本（第 39 轮）★
+   *
+   * 卡片顶部原本显示的是**自动推导**的类型名（「文本」/「画布文件」/「思源笔记」
+   * /「内部文件」/「网盘文件」，由 `CanvasWorkspace.getNodeHeaderTitle` 出）。
+   * 用户希望能改写它。
+   *
+   * 语义：**非空时才覆盖**自动推导值；缺省或空串 ⇒ 回退到类型名
+   * （所以"清空输入框"＝恢复默认，不是显示空白）。
+   */
+  headerTitle?: string
   [key: string]: unknown
 }
 

@@ -665,6 +665,7 @@
             <header
               v-if="node.type !== 'group' && showNodeHeader"
               class="canvas-node__header"
+              :class="{ 'canvas-node__header--editing': editingNodeHeaderId === node.id }"
               data-drag-handle="true"
               draggable="false"
             >
@@ -673,7 +674,34 @@
                 :name="getNodeHeaderIconName(node)"
                 :size="14"
               />
-              <span class="canvas-node__header-title" draggable="false">{{ getNodeHeaderTitle(node) }}</span>
+              <!--
+                ★ 抬头文本：编辑态就地换成输入框（第 39 轮）★
+
+                `.canvas-node__header` 同时是**唯一的拖拽手柄**（`data-drag-handle`），
+                所以输入框必须自己挡掉指针/拖拽事件，否则一进去就被拖走：
+                `@pointerdown.stop` / `@mousedown.stop` / `@dragstart.prevent`。
+                `cursor` 也在样式里按编辑态切回 `text`。
+              -->
+              <input
+                v-if="editingNodeHeaderId === node.id"
+                :ref="setNodeHeaderInputRef"
+                v-model="nodeHeaderDraft"
+                class="canvas-node__header-input"
+                :placeholder="getNodeHeaderTitle(node)"
+                data-testid="canvas-node-header-input"
+                draggable="false"
+                @pointerdown.stop
+                @mousedown.stop
+                @click.stop
+                @dragstart.prevent
+                @keydown.stop="handleNodeHeaderKeydown($event)"
+                @blur="commitNodeHeaderEditing"
+              >
+              <span
+                v-else
+                class="canvas-node__header-title"
+                draggable="false"
+              >{{ getNodeHeaderTitle(node) }}</span>
               <!-- ★ 徽标移入抬头（用户要求）：与抬头同一行、靠右，避免正文再占一行 ★ -->
               <span
                 v-if="getNodeHeaderBadge(node)"
@@ -1535,7 +1563,7 @@
               name="refresh"
             />
           </button>
-                              <button
+          <button
             v-if="editor.selectedNodeCount === 1 && editor.selectedNode"
             class="selection-toolbar__button"
             data-testid="selection-toolbar-edit"
@@ -1547,6 +1575,28 @@
             <CanvasIcon
               class="selection-toolbar__icon"
               name="edit"
+            />
+          </button>
+          <!--
+            ★ 编辑卡片抬头文本（第 39 轮）★
+
+            注意与上面那个「编辑」按钮的区别：那个在文件类节点上是**打开**
+            （笔记 / 网盘文件都在页签里打开），文本类节点上才是编辑正文。
+            这一个专门改卡片顶部那一行文字（现在显示的是「文本」「画布文件」
+            「思源笔记」「内部文件」「网盘文件」这类类型名）。
+          -->
+          <button
+            v-if="canEditNodeHeaderTitle"
+            class="selection-toolbar__button"
+            data-testid="selection-toolbar-edit-title"
+            :aria-label="SELECTION_TOOLBAR_TOOLTIPS.editTitle"
+            :data-tooltip="SELECTION_TOOLBAR_TOOLTIPS.editTitle"
+            type="button"
+            @click.stop="startNodeHeaderEditing"
+          >
+            <CanvasIcon
+              class="selection-toolbar__icon"
+              name="convert-to-text"
             />
           </button>
           <button
@@ -2430,6 +2480,143 @@ const showNodeHeader = computed(() => {
   return editor.getPluginSettings().showNodeHeader
 })
 
+/* ──────────────────────────────────────────────────────────────
+ * 卡片抬头文本的就地编辑（第 39 轮）
+ *
+ * 用户原话：「卡片增开编辑 最顶部 文本功能 / 编辑和修改目前显示文本、画布、
+ *            思源笔记、内部文件、网盘文件 这些位置的显示内容。」
+ *
+ * ★ 与已有的「编辑」按钮不是一回事 ★
+ *   `selection-toolbar-edit`（`handleToolbarEdit` → `handleNodeDoubleClick`）在
+ *   file 节点上是**打开**（笔记开页签、网盘文件开页签），在 text/query 上是编辑正文。
+ *   这里新增的是**抬头那一行文本**的编辑 —— 单独一个按钮、单独一套状态。
+ *
+ * 落盘：写进节点的 `headerTitle`（见 types.ts）。空串 = 删字段 = 恢复默认类型名。
+ * ────────────────────────────────────────────────────────────── */
+
+const editingNodeHeaderId = ref("")
+const nodeHeaderDraft = ref("")
+const nodeHeaderInputRef = ref<HTMLInputElement>()
+
+/**
+ * 「编辑标题」按钮的显示条件：**恰好选中 1 个、且该节点有抬头**。
+ *
+ * `group` 排除掉 —— 群组不渲染 `.canvas-node__header`（`v-if="node.type !== 'group'"`），
+ * 它的标题是另一个字段（`label`，只在折叠态显示）。硬把抬头编辑套上去
+ * 会出现"点了按钮但页面上找不到可编辑的东西"。
+ */
+const canEditNodeHeaderTitle = computed(() => {
+  if (editor.selectedNodeCount !== 1) {
+    return false
+  }
+  const node = editor.selectedNode
+  return !!node && node.type !== "group"
+})
+
+/** 函数式 ref：`v-for` 里只能这样拿到"当前那个"输入框 */
+function setNodeHeaderInputRef(element: unknown) {
+  nodeHeaderInputRef.value = (element as HTMLInputElement | null) ?? undefined
+}
+
+/**
+ * 进入抬头编辑。
+ *
+ * 只在**恰好选中 1 个、且不是 group** 的节点上可用 —— 与工具条按钮的显示条件一致
+ * （`group` 没有抬头，它的标题是 `label`，走别的路径）。
+ */
+function startNodeHeaderEditing() {
+  if (editor.selectedNodeCount !== 1 || !editor.selectedNode) {
+    return
+  }
+  const node = editor.selectedNode
+  if (node.type === "group") {
+    return
+  }
+
+  /**
+   * ★ 草稿预填"当前看到的文本"而不是只有自定义值 ★
+   *
+   * 用户看到的抬头可能是自动推导出来的类型名（例如「网盘文件」）。
+   * 如果草稿留空，用户得自己猜"原来写的是什么"；预填当前显示值，
+   * 用户可以直接在它基础上改（这才是"编辑和修改目前显示的内容"）。
+   */
+  editingNodeHeaderId.value = node.id
+  nodeHeaderDraft.value = getNodeHeaderTitle(node)
+
+  void nextTick(() => {
+    const input = nodeHeaderInputRef.value
+    if (!input) {
+      return
+    }
+    input.focus()
+    input.select()
+  })
+}
+
+/**
+ * 提交。空串 ⇒ 写 `undefined`，让 JSON 序列化**删掉该字段**，
+ * 抬头自动回退到类型名（＝恢复默认）。
+ *
+ * ⚠️ 必须先读走 id 再清空状态：`input` 的 `blur` 会再触发一次本函数，
+ * 那时 `editingNodeHeaderId` 已被清空、直接早退，不会重复写盘。
+ */
+function commitNodeHeaderEditing() {
+  const nodeId = editingNodeHeaderId.value
+  if (!nodeId) {
+    return
+  }
+
+  const node = editor.state.document.nodes.find((candidate) => candidate.id === nodeId)
+  if (node) {
+    const next = nodeHeaderDraft.value.trim()
+    const derived = getDerivedNodeHeaderTitle(node)
+    const current = typeof node.headerTitle === "string" ? node.headerTitle.trim() : ""
+
+    /**
+     * ★ 比较"归一化后的目标值"和"当前自定义值"，不能直接比"用户输入 vs 推导值" ★
+     *
+     * 归一化规则：输入为空、**或输入恰好等于推导值** ⇒ 视为"没有自定义"
+     * （`undefined`）。因为两者显示效果完全相同，没必要固化一个相等的副本 ——
+     * 固化了反而会让该节点以后不再跟随推导逻辑 / i18n 文案的变化。
+     *
+     * ⚠️ 为什么必须比"目标值 vs 当前值"（而不是"输入 vs 推导值"）：
+     *   `current = "旧标题"`、用户改回 `"定义"`（＝推导值）时，
+     *   若只判"输入 == 推导值 ⇒ 不写"，就会**一个字节都不写**，
+     *   而节点里仍留着 `headerTitle = "旧标题"` ⇒ 抬头还是"旧标题"，
+     *   用户会以为"改了但没生效"。按目标值比较就能正确地把字段清掉。
+     */
+    const target = next && next !== derived ? next : undefined
+    const previous = current || undefined
+    if (target !== previous) {
+      editor.updateNodeField(nodeId, "headerTitle", target)
+    }
+  }
+
+  editingNodeHeaderId.value = ""
+  nodeHeaderDraft.value = ""
+  nodeHeaderInputRef.value = undefined
+}
+
+/** 取消：不改数据，直接退出编辑态 */
+function cancelNodeHeaderEditing() {
+  editingNodeHeaderId.value = ""
+  nodeHeaderDraft.value = ""
+  nodeHeaderInputRef.value = undefined
+}
+
+function handleNodeHeaderKeydown(event: KeyboardEvent) {
+  if (event.key === "Enter") {
+    event.preventDefault()
+    // 先取消失焦提交的重复触发：commit 自己会清状态
+    commitNodeHeaderEditing()
+    return
+  }
+  if (event.key === "Escape") {
+    event.preventDefault()
+    cancelNodeHeaderEditing()
+  }
+}
+
 function handleCanvasSettingsChanged() {
   settingsRevision.value += 1
 }
@@ -3275,12 +3462,29 @@ function isBilibiliLinkNode(node: CanvasNode): boolean {
   return node.type === "link" && !!node.url && getVideoEmbedUrl(node.url)?.type === "bilibili"
 }
 
+/**
+ * 卡片抬头的**实际渲染高度**（px）。
+ *
+ * ★ 必须与 `.canvas-node__header` 的 CSS 对齐（第 39 轮实测校正）★
+ *
+ * 真机实测（headless Chrome，字体 LXGW WenKai GB Screen）：
+ *   font-size 11px → 抬头高 **29px**（第 39 轮改字号前）
+ *   font-size 13px → 抬头高 **32px**（第 39 轮调大字号后）
+ * 结构上是「6px + 6px 上下 padding + 1px 下边框 + 内容行高」
+ * （图标 14px / 文案行高 19px，取高者）。
+ *
+ * ⚠️ 改 `.canvas-node__header` 的 `font-size` 或 `padding` 时**必须同步这个数**，
+ *    否则 bilibili iframe 的可用高度会被算错（视频被裁切或留白）。
+ *    历史值曾长期写 35（比当时实际高度 29 大 6px），属于近似值。
+ */
+const NODE_HEADER_HEIGHT_PX = 32
+
 function getLinkIframeStyle(node: CanvasNode): Record<string, string> | undefined {
   if (!isBilibiliLinkNode(node)) {
     return undefined
   }
 
-  const headerHeight = showNodeHeader.value ? 35 : 0
+  const headerHeight = showNodeHeader.value ? NODE_HEADER_HEIGHT_PX : 0
   const viewportWidth = Math.max(1, node.width)
   const viewportHeight = Math.max(1, node.height - headerHeight)
   const playerHeight = Math.max(1, viewportWidth * 9 / 16)
@@ -3343,7 +3547,18 @@ function getNodeHeaderBadge(node: CanvasNode): string {
   }
 }
 
-function getNodeHeaderTitle(node: CanvasNode): string {
+/**
+ * **纯推导**的抬头文本（不含用户自定义）。
+ *
+ * ★ 为什么要把它单独抽出来 ★
+ *   编辑抬头时输入框会**预填当前显示的文本**（可能是自动推导出来的类型名，
+ *   例如「文本」/「网盘文件」）。如果用户只是点开又直接确认，那段文本会被
+ *   当成自定义值写进节点 —— 两个坏处：
+ *     ① 无意义的写盘 / 脏标记；
+ *     ② **语义被固化**：以后推导逻辑或 i18n 文案改了，这个节点不再跟着变。
+ *   ⇒ 提交时要拿"用户输入"和**推导值**比，而不是和"当前显示值"比。
+ */
+function getDerivedNodeHeaderTitle(node: CanvasNode): string {
   if (node.type === "text") {
     const lines = (node.text || "").split("\n")
     const firstIndex = lines.findIndex((line) => line.trim().length > 0)
@@ -3410,6 +3625,19 @@ function getNodeHeaderTitle(node: CanvasNode): string {
     }
   }
   return ""
+}
+
+/**
+ * 抬头实际显示的文本：**用户自定义优先，缺省回退到推导值**。
+ *
+ * 用户原话：「卡片增开编辑 最顶部 文本功能 / 编辑和修改目前显示文本、画布、
+ *            思源笔记、内部文件、网盘文件 这些位置的显示内容。」
+ *
+ * 清空输入框 ⇒ `headerTitle` 被删 ⇒ 自动回到类型名（见 `commitNodeHeaderEditing`）。
+ */
+function getNodeHeaderTitle(node: CanvasNode): string {
+  const customTitle = typeof node.headerTitle === "string" ? node.headerTitle.trim() : ""
+  return customTitle || getDerivedNodeHeaderTitle(node)
 }
 
 function getFileCardImageSource(node: CanvasNode): string | undefined {

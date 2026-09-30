@@ -492,7 +492,15 @@ describe("CanvasWorkspace", () => {
     expect(iframe.classes()).toContain("link-card__iframe--bilibili")
     expect(iframe.attributes("style")).toContain("width: 320px")
     expect(iframe.attributes("style")).toContain("height: 180px")
-    expect(iframe.attributes("style")).toContain("transform: scaleY(1.8055555555555556)")
+    /**
+     * scaleY = (节点高 - 抬头高) / (节点宽 × 9/16) = (360 - 32) / (320 × 9/16) = 328/180
+     *
+     * ★ 这个数**故意写成字面量**（而不是按公式现算）★
+     *   它同时充当"抬头高度常量没被误改"的守护：`CanvasWorkspace` 的
+     *   `NODE_HEADER_HEIGHT_PX` 第 39 轮由 35 校正为 32（实测 13px 字号下抬头实高 32px）。
+     *   改抬头样式（font-size / padding）时必须同步这里。
+     */
+    expect(iframe.attributes("style")).toContain("transform: scaleY(1.8222222222222222)")
     expect(iframe.attributes("style")).toContain("transform-origin: left top")
     expect(iframe.attributes("allow")).toBe("autoplay; encrypted-media; fullscreen; picture-in-picture")
     expect(iframe.attributes("allowfullscreen")).toBeUndefined()
@@ -2067,6 +2075,225 @@ describe("CanvasWorkspace", () => {
     await wrapper.find("[data-testid='selection-toolbar-color']").trigger("click")
 
     expect(currentEditor.toggleSelectionPopover).toHaveBeenCalledWith("color")
+  })
+
+  /* ──────────────────────────────────────────────────────────────
+   * 卡片抬头文本的就地编辑（第 39 轮）
+   *
+   * 用户原话：「卡片增开编辑 最顶部 文本功能 / 编辑和修改目前显示文本、画布、
+   *            思源笔记、内部文件、网盘文件 这些位置的显示内容。」
+   *
+   * ★ 与 `selection-toolbar-edit` 不是一回事 ★
+   *   那个按钮在文件类节点上是**打开**（笔记 / 网盘文件开页签），
+   *   文本类节点上才是编辑正文。这里测的是**抬头那一行文字**的编辑。
+   * ────────────────────────────────────────────────────────────── */
+
+  it("shows a user-defined header title instead of the derived type name", () => {
+    const node = createTextNode({ headerTitle: "我的自定义标题" })
+    currentEditor = createEditorMock(node)
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    expect(wrapper.find(".canvas-node__header-title").text()).toBe("我的自定义标题")
+  })
+
+  it("falls back to the derived type name when the custom header title is blank", () => {
+    const node = createTextNode({ headerTitle: "   " })
+    currentEditor = createEditorMock(node)
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    // createTextNode 的正文首行是 `### 定义` ⇒ 去掉 `#` 后为「定义」
+    expect(wrapper.find(".canvas-node__header-title").text()).toBe("定义")
+  })
+
+  it("offers an edit-title action in the quick toolbar for a single card", () => {
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    const button = wrapper.find("[data-testid='selection-toolbar-edit-title']")
+    expect(button.exists()).toBe(true)
+    expect(button.attributes("data-tooltip")).toBe("编辑卡片标题")
+    expect(button.attributes("aria-label")).toBe("编辑卡片标题")
+  })
+
+  it("hides the edit-title action for a group card (groups render no header)", () => {
+    const node = createGroupNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    expect(wrapper.find("[data-testid='selection-toolbar-edit-title']").exists()).toBe(false)
+  })
+
+  it("hides the edit-title action when more than one card is selected", () => {
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id, "another-node"]
+    currentEditor.selectedNodeCount = 2
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    expect(wrapper.find("[data-testid='selection-toolbar-edit-title']").exists()).toBe(false)
+  })
+
+  it("edits the card header title inline and commits it on Enter", async () => {
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    await wrapper.find("[data-testid='selection-toolbar-edit-title']").trigger("click")
+
+    const input = wrapper.find("[data-testid='canvas-node-header-input']")
+    expect(input.exists()).toBe(true)
+    // 预填「当前看到的文本」，用户可以直接在它基础上改
+    expect((input.element as HTMLInputElement).value).toBe("定义")
+
+    await input.setValue("新的标题")
+    await input.trigger("keydown", { key: "Enter" })
+
+    expect(currentEditor.updateNodeField).toHaveBeenCalledWith(node.id, "headerTitle", "新的标题")
+    expect(wrapper.find("[data-testid='canvas-node-header-input']").exists()).toBe(false)
+  })
+
+  it("clearing the header title restores the derived type name (writes undefined)", async () => {
+    const node = createTextNode({ headerTitle: "旧标题" })
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    await wrapper.find("[data-testid='selection-toolbar-edit-title']").trigger("click")
+    const input = wrapper.find("[data-testid='canvas-node-header-input']")
+    await input.setValue("   ")
+    await input.trigger("keydown", { key: "Enter" })
+
+    // undefined 让 JSON.stringify 丢掉该字段 ⇒ 抬头回到类型名
+    expect(currentEditor.updateNodeField).toHaveBeenCalledWith(node.id, "headerTitle", undefined)
+  })
+
+  it("cancels header title editing on Escape without writing", async () => {
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    await wrapper.find("[data-testid='selection-toolbar-edit-title']").trigger("click")
+    const input = wrapper.find("[data-testid='canvas-node-header-input']")
+    await input.setValue("不该被保存")
+    await input.trigger("keydown", { key: "Escape" })
+
+    expect(currentEditor.updateNodeField).not.toHaveBeenCalled()
+    expect(wrapper.find("[data-testid='canvas-node-header-input']").exists()).toBe(false)
+  })
+
+  it("does not write back when the header title is unchanged", async () => {
+    const node = createTextNode()
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    await wrapper.find("[data-testid='selection-toolbar-edit-title']").trigger("click")
+    // 一个字符都不改就直接提交 ⇒ 不该产生写盘/脏标记
+    await wrapper.find("[data-testid='canvas-node-header-input']").trigger("keydown", { key: "Enter" })
+
+    expect(currentEditor.updateNodeField).not.toHaveBeenCalled()
+  })
+
+  it("clears the stored title when the user types the derived value back", async () => {
+    // ★ 边界：节点本来有自定义标题，用户把它改回「推导值」——
+    //   必须清掉字段（否则抬头仍显示旧标题，用户会以为"改了没生效"）。
+    const node = createTextNode({ headerTitle: "旧标题" })
+    currentEditor = createEditorMock(node)
+    currentEditor.selectionToolbar.visible = true
+    currentEditor.state.selectedNodeIds = [node.id]
+
+    const wrapper = mount(CanvasWorkspace, {
+      props: {
+        bootstrap: {},
+        plugin: {},
+        setTitle: vi.fn(),
+      },
+    })
+
+    await wrapper.find("[data-testid='selection-toolbar-edit-title']").trigger("click")
+    const input = wrapper.find("[data-testid='canvas-node-header-input']")
+    expect((input.element as HTMLInputElement).value).toBe("旧标题")
+
+    // createTextNode 的正文首行 `### 定义` ⇒ 推导值就是「定义」
+    await input.setValue("定义")
+    await input.trigger("keydown", { key: "Enter" })
+
+    expect(currentEditor.updateNodeField).toHaveBeenCalledWith(node.id, "headerTitle", undefined)
   })
 
   it("shows a refresh button for a single selected Siyuan document node and triggers refresh", async () => {
