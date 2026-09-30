@@ -11,6 +11,9 @@ dist-package/
 _verify/
 _verify-dist/
 _verify-chrome-profile/
+
+# 工作区记忆（.workbuddy/memory/*.md 里可能含真实 NAS 口令与 token）⇒ 绝不入库
+.workbuddy/
 _dist-old*/
 
 # 从上游裁剪出来的参考快照（不是本仓库的源码，不发布）

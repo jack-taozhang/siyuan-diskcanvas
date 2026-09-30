@@ -3,49 +3,119 @@
  * 用 **Git Data API 整树推送** 把本地 HEAD 推到远端分支。
  *
  * ★ 为什么需要它 ★
- *   本机 `git push` 会**挂死**（exit 124 超时 / 静默 128），但根因**不是**网络、
- *   也**不是**权限：GCM（git-credential-manager）里有有效凭据 ——
- *     printf 'protocol=https\nhost=github.com\n\n' | git-credential-manager.exe get
- *   能拿到 `gho_…`；用它打 `GET /repos/...` 也返回 `permissions.push = true`。
- *   是 GCM 在**非桌面 shell** 里自己卡住。⇒ 绕开 git 的凭据链路，直接走 REST。
+ *   `git push` 在本机会失败，而且**两条路都堵**：
+ *     · 凭据侧：GCM（git-credential-manager）在**非桌面 shell** 里会自己卡住
+ *       （实测 exit 124 挂死；根因有时是系统级 `credential.helper = helper-selector`，
+ *        那个**交互式**选择器先跑并耗 ~39s，把整条命令拖到超时）；
+ *     · 传输侧：`github.com` 的 HTTPS **时通时断**，实测两种报错 ——
+ *       `curl 56 schannel: server closed abruptly (missing close_notify)`、
+ *       `schannel: failed to receive handshake, SSL/TLS connection failed`。
+ *   而 **`api.github.com` 一直稳** ⇒ 绕开 git 的传输与凭据链路，直接走 REST。
+ *
+ * ★★ 本脚本**不调用同步族子进程** ★★
+ *   `execSync` / `execFileSync` / `spawnSync` 在本机沙箱**一律 EBUSY**
+ *   （`spawnSync` 还是「静默返回 null」这种最难查的形态）
+ *   ⇒ 所有 git 调用一律走**异步 `spawn`**。
+ *   （同源修复：tools/pack.js、tools/gh-release.mjs、tools/lib/github-cred.mjs）
  *
  * ★ 与之配套的坑（都实测过）★
- *   1. `github.com` **时通时断**（同一 session 内翻过两次），`api.github.com` 一直稳。
- *      本脚本只依赖 `api.github.com`。
- *   2. 远端那个提交可能是**上一次用 API 建的**，本地**从未 fetch 到** ⇒
- *      不能 `git diff <remote_head> HEAD`（exit 128）。
+ *   1. 远端那个提交可能是**上一次用 API 建的** —— 与本地同 tree 但 SHA 不同，
+ *      而本地**从未 fetch 到该对象** ⇒ 不能 `git diff <remote_head> HEAD`（exit 128）。
  *      改法：在本地提交链里找一个 **tree == base_tree** 的提交当 diff 基点。
- *   3. `github.com` 不通时 `git fetch` 拿不到对象 ⇒ 本地引用改用
- *      `git update-ref refs/remotes/origin/main <本地同 tree 的提交>` 对齐。
+ *   2. `github.com` 不通时 `git fetch` 拿不到对象 ⇒ 本地引用改用
+ *      `git update-ref refs/remotes/origin/<branch> <本地同 tree 的提交>` 对齐。
+ *   3. 远端历史会被**压成一个提交**（parents 只有远端 HEAD）。内容与本地 HEAD
+ *      完全一致（脚本会逐字节比对 tree 并在不一致时中止），但提交粒度会丢。
  *
  * 用法：
  *   node tools/gh-push-api.mjs [--dry-run] [--branch main]
  *
  * 退出码：0 成功（含"已是最新"）；1 失败。
  */
-import { execFileSync } from "node:child_process"
+import { spawn } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { readGithubToken } from "./lib/github-cred.mjs"
 
 const API = "https://api.github.com"
+const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
 
 const argv = process.argv.slice(2)
 const DRY = argv.includes("--dry-run")
 const branchIdx = argv.indexOf("--branch")
 const BRANCH = branchIdx >= 0 ? argv[branchIdx + 1] : "main"
 
-function git(...args) {
-  return execFileSync("git", args, { encoding: "utf8" }).trim()
+/**
+ * ★ 异步跑 git ★
+ * 同步族（execFileSync/spawnSync/execSync）在本机沙箱一律 EBUSY，
+ * 所以这里是唯一的实现方式。带 timeout，避免 fetch 之类长命令挂死。
+ */
+function gitRun(args, timeout = 120000) {
+  return new Promise((resolve_, reject_) => {
+    const p = spawn("git", args, { cwd: ROOT })
+    const out = []
+    const err = []
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try { p.kill() } catch { /* 忽略 */ }
+      reject_(new Error(`git ${args.join(" ")} 超时（${timeout}ms）`))
+    }, timeout)
+    p.stdout.on("data", (d) => out.push(d))
+    p.stderr.on("data", (d) => err.push(d))
+    p.on("error", (e) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject_(e)
+    })
+    p.on("close", (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const stdout = Buffer.concat(out)
+      if (code !== 0) {
+        const stderr = Buffer.concat(err).toString("utf8")
+        reject_(new Error(`git ${args.join(" ")} → 退出码 ${code}\n${stderr.slice(0, 600)}`))
+        return
+      }
+      resolve_({ text: stdout.toString("utf8").trim(), buf: stdout })
+    })
+  })
+}
+const git = (...args) => gitRun(args)
+const gitText = async (...args) => (await gitRun(args)).text
+const gitBuf = async (...args) => (await gitRun(args)).buf
+const tryGit = async (args, timeout) => {
+  try {
+    return await gitRun(args, timeout)
+  } catch {
+    return null
+  }
 }
 
-function gitBuffer(...args) {
-  return execFileSync("git", args, { encoding: "buffer" })
-}
-
+/**
+ * 读 .git/config 解析 owner/repo。
+ * ★ 同样不开子进程 —— 取个 remote url 不值得冒 EBUSY 的险，也不依赖环境变量。
+ */
 function parseSlug() {
-  const url = git("remote", "get-url", "origin")
-  const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
+  const cfgPath = resolve(ROOT, ".git/config")
+  let txt = ""
+  try {
+    txt = readFileSync(cfgPath, "utf8")
+  } catch {
+    throw new Error(`读不到 ${cfgPath}`)
+  }
+  const block = txt.match(/\[remote "origin"\]([\s\S]*?)(?=\n\[|$)/)
+  const url = block && block[1].match(/^\s*url\s*=\s*(.+)$/m)
+  if (!url) {
+    throw new Error(`读不到 ${cfgPath} 里的 [remote "origin"] url`)
+  }
+  const m = url[1].trim().match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
   if (!m) {
-    throw new Error(`无法从 remote 解析 owner/repo：${url}`)
+    throw new Error(`无法从 remote 解析 owner/repo：${url[1].trim()}`)
   }
   return `${m[1]}/${m[2]}`
 }
@@ -59,7 +129,7 @@ async function req(method, path, body) {
     headers: {
       Authorization: `Bearer ${TOKEN}`,
       Accept: "application/vnd.github+json",
-      "User-Agent": "diskcanvas-gh-push",
+      "User-Agent": "siyuan-gh-push",
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -83,9 +153,9 @@ function fail(msg, detail) {
 }
 
 // ── 1) 本地状态 ─────────────────────────────────────────────
-const localHead = git("rev-parse", "HEAD")
-const localTree = git("rev-parse", "HEAD^{tree}")
-const subject = git("log", "-1", "--pretty=%s")
+const localHead = await gitText("rev-parse", "HEAD")
+const localTree = await gitText("rev-parse", "HEAD^{tree}")
+const subject = await gitText("log", "-1", "--pretty=%s")
 console.log(`仓库     : ${SLUG}`)
 console.log(`本地 HEAD: ${localHead.slice(0, 8)}  tree ${localTree.slice(0, 8)}`)
 console.log(`提交信息 : ${subject}`)
@@ -111,10 +181,10 @@ const baseTree = commitRes.json.tree.sha
 console.log(`base_tree: ${baseTree.slice(0, 8)}`)
 
 // ── 3) 找本地 diff 基点（tree == base_tree）─────────────────
-const localCommits = git("log", "--format=%H", "-200").split("\n").filter(Boolean)
+const localCommits = (await gitText("log", "--format=%H", "-200")).split("\n").filter(Boolean)
 let baseCommit = null
 for (const c of localCommits) {
-  if (git("rev-parse", `${c}^{tree}`) === baseTree) {
+  if ((await gitText("rev-parse", `${c}^{tree}`)) === baseTree) {
     baseCommit = c
     break
   }
@@ -128,7 +198,7 @@ if (!baseCommit) {
 console.log(`diff 基点: ${baseCommit.slice(0, 8)}（本地）`)
 
 // ── 4) 列出改动 ────────────────────────────────────────────
-const diff = git("diff", "--name-status", baseCommit, localHead)
+const diff = await gitText("diff", "--name-status", baseCommit, localHead)
 const changes = []
 for (const line of diff.split("\n")) {
   if (!line.trim()) continue
@@ -161,7 +231,7 @@ for (const c of changes) {
     treeItems.push({ path: c.path, mode: "100644", type: "blob", sha: null })
     continue
   }
-  const ls = git("ls-tree", localHead, c.path)
+  const ls = await gitText("ls-tree", localHead, c.path)
   if (!ls) {
     skipped.push([c.path, "ls-tree 为空"])
     continue
@@ -172,7 +242,7 @@ for (const c of changes) {
     skipped.push([c.path, "子模块"])
     continue
   }
-  const raw = gitBuffer("cat-file", "blob", sha)
+  const raw = await gitBuf("cat-file", "blob", sha)
   const blobRes = await req("POST", `/repos/${SLUG}/git/blobs`, {
     content: raw.toString("base64"),
     encoding: "base64",
@@ -204,7 +274,7 @@ if (newTree !== localTree) {
 console.log("✓ tree 与本地完全一致")
 
 // ── 7) 建 commit ───────────────────────────────────────────
-const msg = git("log", "-1", "--pretty=%B").trim()
+const msg = await gitText("log", "-1", "--pretty=%B")
 const commitCreate = await req("POST", `/repos/${SLUG}/git/commits`, {
   message: msg,
   tree: newTree,
@@ -242,12 +312,11 @@ console.log(`✓ 回读确认远端 ${BRANCH} = ${finalSha.slice(0, 8)}`)
 //
 //   能不能 fetch 到取决于 `github.com` 是否恰好可达（它时通时断）。
 let synced = false
-try {
-  execFileSync("git", ["fetch", "origin", BRANCH], { stdio: "pipe", timeout: 20000 })
+const fetched = await tryGit(["fetch", "origin", BRANCH], 30000)
+if (fetched) {
   // ★ 比 FETCH_HEAD 而不是 origin/<branch>：`git fetch <remote> <ref>` 是否
   //   顺带更新 refs/remotes/origin/<ref> 取决于 refspec 配置，FETCH_HEAD 一定最新。
-  const stat = git("diff", "--stat", "HEAD", "FETCH_HEAD")
-
+  const stat = await gitText("diff", "--stat", "HEAD", "FETCH_HEAD")
   if (stat) {
     console.log(`⚠️ fetch 成功，但 HEAD 与 FETCH_HEAD 仍有差异（请复核）:\n${stat}`)
   } else {
@@ -255,22 +324,20 @@ try {
      * tree 相同 ⇒ hard reset **不可能**丢东西。
      * 但工作区若有未提交改动，仍只动引用（不碰工作区），把决定权留给用户。
      */
-    const dirty = git("status", "--porcelain")
+    const dirty = await gitText("status", "--porcelain")
     if (dirty) {
-      execFileSync("git", ["update-ref", `refs/remotes/origin/${BRANCH}`, "FETCH_HEAD"])
-      console.log("✓ 已更新 origin/" + BRANCH + "（工作区有未提交改动，未改本地分支）")
+      await tryGit(["update-ref", `refs/remotes/origin/${BRANCH}`, "FETCH_HEAD"])
+      console.log(`✓ 已更新 origin/${BRANCH}（工作区有未提交改动，未改本地分支）`)
     } else {
-      execFileSync("git", ["reset", "--hard", "FETCH_HEAD"], { stdio: "pipe" })
+      await tryGit(["reset", "--hard", "FETCH_HEAD"])
       console.log(`✓ 本地 ${BRANCH} 已对齐远端（tree 相同，工作区无任何变化）`)
       synced = true
     }
   }
-} catch {
-  // github.com 不可达，属预期
 }
 if (!synced) {
   // 降级：把远端跟踪分支指到本地同 tree 的提交，让 status 显示同步
-  execFileSync("git", ["update-ref", `refs/remotes/origin/${BRANCH}`, localHead])
+  await tryGit(["update-ref", `refs/remotes/origin/${BRANCH}`, localHead])
   console.log(
     `✓ github.com 不可达，已把 origin/${BRANCH} 指到本地同 tree 的提交（status 显示同步）`,
   )

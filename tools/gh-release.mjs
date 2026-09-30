@@ -20,13 +20,14 @@
  *        [--target <sha|branch>] [--title "DiskCanvas 盘绘 v0.2.24"] \
  *        [--notes "markdown"] [--notes-file path.md] [--update-body]
  */
-import { execFileSync } from "node:child_process"
 import { readFileSync, statSync } from "node:fs"
 import { basename, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { readGithubToken } from "./lib/github-cred.mjs"
 
 const API = "https://api.github.com"
 const UPLOADS = "https://uploads.github.com"
+const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
 
 function arg(name, fallback = undefined) {
   const i = process.argv.indexOf(`--${name}`)
@@ -54,7 +55,27 @@ if (NOTES_FILE) {
 // ── 凭据 / 仓库 ────────────────────────────────────────────
 const TOKEN = readGithubToken()
 
-const remoteUrl = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }).trim()
+/**
+ * ★ 不调 git 子进程：origin 直接读 `.git/config` ★
+ *   本机沙箱下**同步族子进程一律 EBUSY**（execSync / execFileSync / spawnSync 全废，
+ *   其中 spawnSync 还是「静默返回 null」这种最难查的形态）。取个 remote url
+ *   不值得冒这个险 —— 同源修复见 tools/pack.js（网盘）与本仓库 MEMORY。
+ */
+function readOriginUrl() {
+  const cfgPath = resolve(ROOT, ".git/config")
+  try {
+    const txt = readFileSync(cfgPath, "utf8")
+    const block = txt.match(/\[remote "origin"\]([\s\S]*?)(?=\n\[|$)/)
+    const url = block && block[1].match(/^\s*url\s*=\s*(.+)$/m)
+    if (url) {
+      return url[1].trim()
+    }
+  } catch {
+    /* 落到下面的报错 */
+  }
+  throw new Error(`读不到 ${cfgPath} 里的 [remote "origin"] url`)
+}
+const remoteUrl = readOriginUrl()
 const slugMatch = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
 if (!slugMatch) throw new Error(`无法解析 owner/repo：${remoteUrl}`)
 const SLUG = `${slugMatch[1]}/${slugMatch[2]}`
