@@ -13,6 +13,8 @@
     "build:standalone": "vite build --config vite.standalone.config.ts",
     "pack": "node tools/pack.js",
     "pack:rebuild": "node tools/pack.js --rebuild",
+    "gh:push": "node tools/gh-push-api.mjs",
+    "gh:release": "node tools/gh-release.mjs",
     "check:standalone": "node tools/check-standalone-build.mjs",
     "check:template": "node tools/check-template-identifiers.mjs",
     "check:refs": "node tools/check-broken-refs.mjs",
