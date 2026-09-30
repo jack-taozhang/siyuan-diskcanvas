@@ -53,7 +53,7 @@ if (NOTES_FILE) {
 }
 
 // ── 凭据 / 仓库 ────────────────────────────────────────────
-const TOKEN = readGithubToken()
+const TOKEN = await readGithubToken()
 
 /**
  * ★ 不调 git 子进程：origin 直接读 `.git/config` ★
