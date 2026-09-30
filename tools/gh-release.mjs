@@ -20,9 +20,10 @@
  *        [--target <sha|branch>] [--title "DiskCanvas 盘绘 v0.2.24"] \
  *        [--notes "markdown"] [--notes-file path.md] [--update-body]
  */
-import { execFileSync, spawnSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { readFileSync, statSync } from "node:fs"
 import { basename, resolve } from "node:path"
+import { readGithubToken } from "./lib/github-cred.mjs"
 
 const API = "https://api.github.com"
 const UPLOADS = "https://uploads.github.com"
@@ -51,24 +52,7 @@ if (NOTES_FILE) {
 }
 
 // ── 凭据 / 仓库 ────────────────────────────────────────────
-/**
- * ★ 用 `git credential fill`（遵从用户配置的 helper）而不是硬编码 GCM 路径 ★
- * ⚠️ 必须带 timeout：凭据缺失时助手会尝试交互，在非桌面 shell 里会挂死。
- */
-function readToken() {
-  const res = spawnSync("git", ["credential", "fill"], {
-    input: "protocol=https\nhost=github.com\n\n",
-    encoding: "utf8",
-    timeout: 15000,
-  })
-  if (res.error) {
-    throw new Error(`取凭据失败：${res.error.message}`)
-  }
-  const line = (res.stdout || "").split("\n").find((l) => l.startsWith("password="))
-  if (!line) throw new Error("凭据里没有 password（先确认 github.com 已登录过一次）")
-  return line.slice("password=".length).trim()
-}
-const TOKEN = readToken()
+const TOKEN = readGithubToken()
 
 const remoteUrl = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }).trim()
 const slugMatch = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)

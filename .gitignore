@@ -26,5 +26,7 @@ __pycache__/
 .env.local
 .env.*.local
 tools/.nb-local.json
+# ★ GitHub token（tools/gh-*.mjs 用它走稳定取凭据路径；绝不入库）
+.gh-token
 
 *.log

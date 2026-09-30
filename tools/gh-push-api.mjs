@@ -23,7 +23,8 @@
  *
  * 退出码：0 成功（含"已是最新"）；1 失败。
  */
-import { execFileSync, spawnSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
+import { readGithubToken } from "./lib/github-cred.mjs"
 
 const API = "https://api.github.com"
 
@@ -40,32 +41,6 @@ function gitBuffer(...args) {
   return execFileSync("git", args, { encoding: "buffer" })
 }
 
-/**
- * 取 GitHub 凭据。
- *
- * ★ 用 `git credential fill` 而不是直接调 git-credential-manager ★
- *   前者遵从**用户自己配置的** credential.helper（GCM / store / 其它都可），
- *   脚本因此不绑定任何本机绝对路径，换个环境也能用。
- *
- * ⚠️ 必须带 timeout：凭据不存在时助手会**尝试交互**，在非桌面 shell 里会挂死。
- *    本场景已确认凭据是存在的（GCM 里有 `gho_…`），所以不会走到交互分支。
- */
-function readToken() {
-  const res = spawnSync("git", ["credential", "fill"], {
-    input: "protocol=https\nhost=github.com\n\n",
-    encoding: "utf8",
-    timeout: 15000,
-  })
-  if (res.error) {
-    throw new Error(`取凭据失败：${res.error.message}（凭据助手可能不可用或需交互）`)
-  }
-  const line = (res.stdout || "").split("\n").find((l) => l.startsWith("password="))
-  if (!line) {
-    throw new Error("凭据里没有 password（先确认 github.com 已登录过一次）")
-  }
-  return line.slice("password=".length).trim()
-}
-
 function parseSlug() {
   const url = git("remote", "get-url", "origin")
   const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
@@ -75,7 +50,7 @@ function parseSlug() {
   return `${m[1]}/${m[2]}`
 }
 
-const TOKEN = readToken()
+const TOKEN = readGithubToken()
 const SLUG = parseSlug()
 
 async function req(method, path, body) {
@@ -260,27 +235,41 @@ if (finalSha !== newCommit) {
 console.log(`✓ 回读确认远端 ${BRANCH} = ${finalSha.slice(0, 8)}`)
 
 // ── 10) 对齐本地引用 ───────────────────────────────────────
-// 远端对象本地多半没有 ⇒ 直接 update-ref 会报 "nonexistent object"。
-// 能不能 fetch 到取决于 `github.com` 是否恰好可达（它时通时断）。
-let aligned = false
+// ★ 为什么必须做这件事 ★
+//   API 推送的提交是**建在远端 parent 之上**的，而本地提交建在本地 parent 之上
+//   ⇒ 两边 tree 相同但历史**分叉**（status 显示 ahead N / behind N）。
+//   不处理的话，下次 `git push` 会因非快进被拒，且历史越来越乱。
+//
+//   能不能 fetch 到取决于 `github.com` 是否恰好可达（它时通时断）。
+let synced = false
 try {
   execFileSync("git", ["fetch", "origin", BRANCH], { stdio: "pipe", timeout: 20000 })
   // ★ 比 FETCH_HEAD 而不是 origin/<branch>：`git fetch <remote> <ref>` 是否
-  //   顺带更新 refs/remotes/origin/<ref> 取决于 refspec 配置，FETCH_HEAD 一定是最新的。
-  const stat = execFileSync("git", ["diff", "--stat", "HEAD", "FETCH_HEAD"], {
-    encoding: "utf8",
-  }).trim()
+  //   顺带更新 refs/remotes/origin/<ref> 取决于 refspec 配置，FETCH_HEAD 一定最新。
+  const stat = git("diff", "--stat", "HEAD", "FETCH_HEAD")
+
   if (stat) {
     console.log(`⚠️ fetch 成功，但 HEAD 与 FETCH_HEAD 仍有差异（请复核）:\n${stat}`)
   } else {
-    execFileSync("git", ["update-ref", `refs/remotes/origin/${BRANCH}`, "FETCH_HEAD"])
-    console.log(`✓ git fetch 成功，origin/${BRANCH} 已对齐且内容一致`)
-    aligned = true
+    /**
+     * tree 相同 ⇒ hard reset **不可能**丢东西。
+     * 但工作区若有未提交改动，仍只动引用（不碰工作区），把决定权留给用户。
+     */
+    const dirty = git("status", "--porcelain")
+    if (dirty) {
+      execFileSync("git", ["update-ref", `refs/remotes/origin/${BRANCH}`, "FETCH_HEAD"])
+      console.log("✓ 已更新 origin/" + BRANCH + "（工作区有未提交改动，未改本地分支）")
+    } else {
+      execFileSync("git", ["reset", "--hard", "FETCH_HEAD"], { stdio: "pipe" })
+      console.log(`✓ 本地 ${BRANCH} 已对齐远端（tree 相同，工作区无任何变化）`)
+      synced = true
+    }
   }
 } catch {
   // github.com 不可达，属预期
 }
-if (!aligned) {
+if (!synced) {
+  // 降级：把远端跟踪分支指到本地同 tree 的提交，让 status 显示同步
   execFileSync("git", ["update-ref", `refs/remotes/origin/${BRANCH}`, localHead])
   console.log(
     `✓ github.com 不可达，已把 origin/${BRANCH} 指到本地同 tree 的提交（status 显示同步）`,
