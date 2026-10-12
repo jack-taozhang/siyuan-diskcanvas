@@ -22,7 +22,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
 const REPO_NAME = (process.env.GITHUB_REPO || "siyuan-diskcanvas").trim()
 const BRANCH = "main"
 const API = "https://api.github.com"
