@@ -11,28 +11,26 @@ export type CanvasRecentFileSource = "local" | "workspace"
 export const CANVAS_DEFAULT_DIRECTORY = "/data/storage/petal/siyuan-diskcanvas"
 
 /**
- * 网盘连接配置。
+ * 「本机存储」相关设置。
  *
- * ★ 为什么把账号密码放进插件设置 ★
- *   画布要"插入网盘文件"，必须先能连上网盘。
- *   连接信息是**用户级**的，不属于画布数据本身 ——
- *   所以存在插件设置里（思源本地存储），而不是每个 .canvas 文件里。
- *   这样：一个画布文件拿去别处打开，不会把你网盘密码带出去。
+ * ★ 为什么**只有**「常用文件夹」一项、没有服务地址 ★
+ *   地址探测完全由「本机存储」插件负责（同源 `/localfs` → 跨源 `:8021`，
+ *   还跟着飞牛环境变）。画布这边再存一份只会出现"两边不一致"，
+ *   而且用户要改两次。画布真正关心的只有一件事：**我常去哪几个文件夹**。
  *
- * ★ 密码明文存储的风险，如实说明 ★
- *   思源插件设置存在工作区本地（data/storage/petal/<plugin>/），
- *   不加密。这与 siyuan-nebuladisk 的做法一致。
- *   若要更安全，可改为只填用户名、每次启动手动登录。
+ * ★ 为什么与「本机存储」插件自己的 favorites **分开存** ★
+ *   那一份是它**侧边栏**的显示范围。画布是一块独立的工作台，
+ *   在这里圈定的范围不该反过来把侧边栏的显示改掉（反之亦然）。
  */
-export interface NebulaSettings {
-  /** 网盘地址；留空则按当前页面主机名 + 8089 自动推断 */
-  baseUrl: string
-  username: string
-  password: string
-  /** 启动时自动登录 */
-  autoLogin: boolean
-  /** 浏览器端思源需经本地代理（跨源）时的代理地址 */
-  proxyUrl: string
+export interface LocalFsSettings {
+  /**
+   * 常用文件夹（**绝对路径**数组，如 `/vol1/1000/文档`）。
+   *   · 为空/未设置 ⇒ 选择器列出本机**全部**存储空间（默认行为）
+   *   · 有值       ⇒ 只列出这几个文件夹
+   *   存**路径**而不是"带标签的对象"：标签能随时从路径算出来，
+   *   存两份就有不一致的那一天（改过名、换过挂载点）。
+   */
+  favorites: string[]
 }
 
 export interface CanvasPluginSettings {
@@ -55,7 +53,7 @@ export interface CanvasPluginSettings {
    * 收在一个对象里就不会出现"样式合法但间距是 NaN"这种半脏状态。
    */
   grid: CanvasGridSettings
-  nebula: NebulaSettings
+  localFs: LocalFsSettings
 }
 
 export interface CanvasInspectorSectionsState {
@@ -86,60 +84,9 @@ export interface CanvasPluginData {
   version: 1
 }
 
-/**
- * NAS（网盘与思源同机部署）的默认地址 —— **全项目唯一一处硬编码**。
- *
- * ★ 只在「够不着页面主机」时才用到它 ★
- *   常规路径是 `guessNebulaBaseUrl()` 跟随**当前页面主机**推导，
- *   本常量仅兜底两种情形：
- *     · 本机装思源（页面在 127.0.0.1:6806），网盘在 NAS 上
- *     · 推导过程抛异常（catch 分支）
- *
- * ★ 地址变更记录（改这里就够了）★
- *   2026-09-28：`<netdisk-host>` → `<netdisk-host>`
- *   原因：NAS 的 LAN 地址（`enp2s0` `<netdisk-host>/22`）在当前网段下不可达；
- *         改经 ZeroTier 虚拟网卡（`ztuzes2xaf` `<netdisk-host>/24`）访问。
- *   实测（2026-09-28）：
- *     · `http://<netdisk-host>:8089/`          → HTTP 200
- *     · `http://<netdisk-host>:8089/api/login` → 200 + JWT
- *     · `http://<netdisk-host>:8089/`           → 不可达（连接超时）
- */
-const DEFAULT_NEBULA_BASE_URL = "http://<netdisk-host>:8089"
-
-/**
- * 推断一个合理的网盘地址。
- *
- * ★ 为什么不写死 IP ★
- *   同一个插件会被两种环境加载：
- *     · 桌面端（本机装思源）—— 页面在 127.0.0.1:6806，网盘常在另一台机器
- *     · 服务端（NAS 上 Docker 跑思源，浏览器访问）—— 页面在 <NAS 地址>:6806
- *   写死任何 IP 都会让另一种环境连不上。
- *
- *   默认策略：跟随**当前页面所在主机** + 端口 8089。
- *   实测（2026-09-28）：`http://<netdisk-host>:8089/api/login` 返回 200 + JWT，
- *   即「网盘与思源同机部署」这一前提在 NAS 场景成立。
- *   用户仍可在设置里改成别的地址。
- */
-export function guessNebulaBaseUrl(): string {
-  try {
-    const host = (typeof location !== "undefined" && location.hostname) || ""
-    if (!host || host === "localhost" || host === "127.0.0.1") {
-      // 本机思源：网盘通常在 NAS 上，回落到实测可达的 NAS 地址
-      return DEFAULT_NEBULA_BASE_URL
-    }
-    return `http://${host}:8089`
-  } catch {
-    return DEFAULT_NEBULA_BASE_URL
-  }
-}
-
-export function createDefaultNebulaSettings(): NebulaSettings {
+export function createDefaultLocalFsSettings(): LocalFsSettings {
   return {
-    autoLogin: true,
-    baseUrl: guessNebulaBaseUrl(),
-    password: "",
-    proxyUrl: "",
-    username: "tao_zhang",
+    favorites: [],
   }
 }
 
@@ -151,7 +98,7 @@ export function createDefaultCanvasPluginSettings(): CanvasPluginSettings {
     detectExternalChanges: true,
     enableDebugLog: false,
     grid: { ...DEFAULT_CANVAS_GRID_SETTINGS },
-    nebula: createDefaultNebulaSettings(),
+    localFs: createDefaultLocalFsSettings(),
     noteCreationDirectory: "",
     recentFilesLimit: 8,
     showCanvasThumbnails: false,
@@ -196,23 +143,34 @@ function normalizeRecentSourceType(path: string, value: unknown): CanvasRecentFi
   return path.startsWith("/data/") ? "workspace" : "local"
 }
 
-export function normalizeNebulaSettings(value: unknown): NebulaSettings {
-  const defaults = createDefaultNebulaSettings()
+export function normalizeLocalFsSettings(value: unknown): LocalFsSettings {
+  const defaults = createDefaultLocalFsSettings()
   if (!value || typeof value !== "object") {
     return defaults
   }
-  const candidate = value as Partial<NebulaSettings>
-  return {
-    autoLogin: typeof candidate.autoLogin === "boolean" ? candidate.autoLogin : defaults.autoLogin,
-    baseUrl: typeof candidate.baseUrl === "string" && candidate.baseUrl.trim()
-      ? candidate.baseUrl.trim()
-      : defaults.baseUrl,
-    password: typeof candidate.password === "string" ? candidate.password : defaults.password,
-    proxyUrl: typeof candidate.proxyUrl === "string" ? candidate.proxyUrl.trim() : defaults.proxyUrl,
-    username: typeof candidate.username === "string" && candidate.username.trim()
-      ? candidate.username.trim()
-      : defaults.username,
+
+  const candidate = value as Partial<LocalFsSettings>
+  if (!Array.isArray(candidate.favorites)) {
+    return { favorites: defaults.favorites }
   }
+
+  // 去重 + 只留非空字符串 + 统一成正斜杠：设置文件是可手改的明文 JSON，
+  // 一份脏数据不该让整个选择器崩掉（它只是个字符串数组的消费方）。
+  const seen = new Set<string>()
+  const favorites: string[] = []
+  for (const item of candidate.favorites) {
+    if (typeof item !== "string") {
+      continue
+    }
+    const path = item.trim().replace(/\\/g, "/")
+    if (!path || seen.has(path)) {
+      continue
+    }
+    seen.add(path)
+    favorites.push(path)
+  }
+
+  return { favorites }
 }
 
 export function normalizeCanvasPluginData(value: unknown): CanvasPluginData {
@@ -261,7 +219,7 @@ export function normalizeCanvasPluginData(value: unknown): CanvasPluginData {
     enableDebugLog: typeof candidate.settings?.enableDebugLog === "boolean"
       ? candidate.settings.enableDebugLog
       : defaults.settings.enableDebugLog,
-    nebula: normalizeNebulaSettings(candidate.settings?.nebula),
+    localFs: normalizeLocalFsSettings(candidate.settings?.localFs),
     noteCreationDirectory: typeof candidate.settings?.noteCreationDirectory === "string"
       ? candidate.settings.noteCreationDirectory.trim()
       : defaults.settings.noteCreationDirectory,

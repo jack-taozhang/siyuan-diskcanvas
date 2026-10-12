@@ -40,7 +40,7 @@
  *   中文环境完全看不出问题，只在英文界面悄悄退化成兜底值。
  *   ⇒ 既查"不该有的键"（网盘插件特有词条），也查"必须有的键"。
  */
-import { execFileSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -48,6 +48,33 @@ import zlib from "node:zlib"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, "..")
+
+/**
+ * ★ 异步跑外部命令 ★
+ *
+ * 本机（WorkBuddy 运行时）的**同步族子进程一律不可用**：
+ * `spawnSync` / `execSync` / `execFileSync` 全部抛 `EBUSY`（errno -4082），
+ * 其中 `spawnSync` 最阴 —— 不抛异常，只静默返回 `{status:null, error:'EBUSY'}`。
+ * `lib/github-cred.mjs` 的注释里早就把本文件列进了"同源修复"，但这里一直
+ * 还是 `execFileSync` ⇒ `npm run pack:rebuild` 一跑就 EBUSY 崩掉。
+ * 唯一可靠的实现方式是异步 `spawn`（同 `gh-push-api.mjs` 的 `gitRun`）。
+ *
+ * `shell: true` 是必须的：Windows 上 `npm` 实际是 `npm.cmd`，
+ * 不带 shell 直接 spawn 会 ENOENT。
+ */
+function sh(command, args, opts = {}) {
+  return new Promise((done, fail) => {
+    const child = spawn(command, args, { shell: true, stdio: "inherit", cwd: ROOT, ...opts })
+    child.on("error", fail)
+    child.on("close", (code) => {
+      if (code === 0) {
+        done()
+        return
+      }
+      fail(new Error(`${command} ${args.join(" ")} 退出码 ${code}`))
+    })
+  })
+}
 
 const MANIFEST_SRC = join(ROOT, "plugin.json")
 const manifest = JSON.parse(readFileSync(MANIFEST_SRC, "utf8"))
@@ -69,9 +96,13 @@ if (process.argv.includes("--rebuild")) {
    *   `npx vite build` —— 那只会做 build:plugin、清空 dist，
    *   把 build:standalone 的产物（standalone.*）一起清掉。
    *   而且独立页配置里 outDir 是**硬编码 dist**，命令行 --outDir 无效。
+   *
+   * ★ 必须是 `await`（异步 spawn）：同步族在本机一律 EBUSY，
+   *   用 execFileSync 的话 `npm run pack:rebuild` 直接崩（见文件头 sh 的说明）。
+   *   `pack.js` 是 ESM（package.json 有 "type": "module"），顶层 await 可用。
    */
-  execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: ROOT, shell: true })
-  console.log("")
+await sh("npm", ["run", "build"])
+console.log("")
 }
 
 /* ── 产物目录校验 ──────────────────────────────────────────── */
@@ -300,7 +331,7 @@ check("自检 5：i18n 词表必须是本插件的（防跨项目污染）", () 
   const USED = [
     "canvasFileCardTitle",
     "toolbarFileManager",
-    "nodeKindNebulaFile",
+    "nodeKindLocalFsFile",
     "standaloneOpenBlocked",
     "toolbarNew",
   ]

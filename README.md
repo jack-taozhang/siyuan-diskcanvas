@@ -1,18 +1,18 @@
-# DiskCanvas
+# 盘绘 (Canvas)
 
 **English** · [简体中文](README_zh_CN.md)
 
-> Spread netdisk files and SiYuan notes across an infinite canvas, then connect them with edges.
+> Spread local files and SiYuan notes across an infinite canvas, then connect them with edges.
 
 ## What it solves
 
-Your material usually lives in two places: **files on a NAS** (designs, documents, drawings)
+Your material usually lives in two places: **files on local storage** (designs, documents, drawings)
 and **notes in SiYuan**. To connect the dots you either juggle windows or hold the whole
 picture in your head — you want to *spread it out and look at it*.
 
 This plugin adds an infinite canvas to SiYuan:
 
-- Drag **netdisk files** onto the canvas. Images, PDFs, Office files and drawings each use
+- Drag **local files** onto the canvas. Images, PDFs, Office files and drawings each use
   their own preview channel.
 - Drag **SiYuan notes** (documents or blocks) and **SiYuan assets** onto the canvas too.
 - Draw an **edge** between them and the relationship is recorded.
@@ -22,21 +22,21 @@ move around.
 
 ## Card types
 
-Each card shows its **kind** in the header (e.g. "Netdisk file"), with a small badge for the
+Each card shows its **kind** in the header (e.g. "Local file"), with a small badge for the
 finer type (`PDF` / `DWG` / `DOCUMENT`).
 
 | Card | Header | Content | Double-click |
 | --- | --- | --- | --- |
 | **Text** | Text | Markdown written directly on the canvas | Edit |
-| **Netdisk file** | Netdisk file | A file on NebulaDisk | Open with its previewer ※ |
+| **Local file** | Local file | A file on this machine (NAS) | Open with its previewer ※ |
 | **SiYuan note** | SiYuan note | A SiYuan document | Jump back to SiYuan |
 | **SiYuan block** | SiYuan block | A block inside a note | Jump back to SiYuan |
 | **Internal file** | Internal file | A SiYuan asset (image / PDF …) | Jump to its document and block |
 | **Link** | — | A web address | Open in browser |
 | **Group** | — | Frames related cards together | Collapse / expand |
 
-> ※ When editing in a **standalone page** (see below), double-clicking a netdisk card opens the
-> netdisk file **in its own browser page** instead. Everything else behaves the same.
+> ※ When editing in a **standalone page** (see below), double-clicking a local-file card opens
+> that file **in its own browser page** instead. Everything else behaves the same.
 
 > Note cards show only the **title and outline** by default, so the structure reads at a glance.
 
@@ -87,7 +87,7 @@ The **Grid** button (right next to the palette button) adjusts the canvas refere
 - Grid line colour follows the theme, so it adapts to light/dark automatically
 - **A canvas preview embedded in a note shows no grid** — that is a reading surface, and the
   grid would fight the note's own line rhythm
-- Also available under **Settings → Plugin → DiskCanvas**
+- Also available under **Settings → Plugin → 盘绘**
 
 ## Standalone page editing
 
@@ -102,34 +102,46 @@ current canvas file into its own browser tab for editing, **without SiYuan's UI 
   details line up.
 - Editing, saving, undo, zoom, edges, palette and shortcuts all work; it writes the same
   `.canvas` file
-- In the standalone page, **double-clicking a netdisk card opens that file in its own browser
-  page** (the URL is produced by the netdisk side according to file type: direct link for native
-  types, online preview for Office/archives, CAD viewer for drawings)
+- In the standalone page, **double-clicking a local-file card opens that file in its own browser
+  page** (the URL is produced by the Local Storage side according to file type: direct link for
+  native types, a preview page for Office files, CAD viewer for drawings)
 
-> Requires netdisk plugin **1.0.4 or newer** (the `webUrl` contract method). Older versions get a
-> clear error instead of failing silently.
+> Requires the **Local Storage** plugin (`siyuan-localfs`) to be installed and enabled. If it is
+> missing you get a clear message instead of a silent failure.
 
-## Relationship to the netdisk plugin
+## Relationship to the Local Storage plugin
 
-**The canvas does not configure a netdisk connection of its own.**
+**The canvas does not configure a storage connection of its own.**
 
-The `siyuan-nebuladisk` plugin exposes an external contract via
-`window.__nebuladiskPlugin.external` (`listMounts` / `list` / `stat` / `previewUrl` …).
+The `siyuan-localfs` plugin exposes an external contract via `window.__localfsPlugin.external`
+(`list` / `roots` / `probe` / `fileUrl` / `previewUrl` / `openFile` / `pickDirectories`).
 The canvas consumes that contract:
 
-- Once the netdisk plugin is signed in, the canvas just works — **no need to enter the address
-  and credentials a second time in the canvas settings**
-- Preview URLs are always constructed by the netdisk side; the canvas only forwards them,
-  so internal addresses and signing logic never leak into the canvas
+- Once the Local Storage plugin is reachable, the canvas just works — **no need to enter the
+  address a second time in the canvas settings**
+- Preview URLs are always constructed by the Local Storage side; the canvas only forwards them,
+  so same-origin channels, port rewrites and signing logic never leak into the canvas
+- Double-clicking a card calls the other side's `openFile()` — exactly the same path as
+  double-clicking a file in its sidebar
 
-> That is why this plugin's settings panel has **no** netdisk section; if the netdisk is
+> That is why this plugin's settings panel has **no** storage section; if it is
 > unavailable it says so explicitly.
 
-## Drag files from the netdisk tree
+## Favorite folders
 
-Drag a file straight from the netdisk plugin's file tree onto the canvas to create a netdisk
-file card. The drag payload is the netdisk plugin's `application/x-nebuladisk-embed` MIME;
-each plugin lets through drags it does not recognise, so they never interfere.
+The canvas settings panel has its own **Favorite folders** group (absolute paths, picked or typed):
+
+- If set, the **Local file** picker lists only those folders as roots; leave it empty to list
+  every storage space on this machine
+- This setting belongs to the canvas alone and is **independent** of the Local Storage plugin's
+  own favorites (that one is a sidebar display preference; the canvas always receives the
+  objective "which storage spaces exist on this machine")
+
+## Drag files from the Local Storage tree
+
+Drag a file (not a folder) straight from the Local Storage plugin's file tree onto the canvas to
+create a file card. The drag payload uses the `application/x-localfs-embed` MIME; each plugin lets
+through drags it does not recognise, so they never interfere.
 
 ## Built-in features
 

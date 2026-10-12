@@ -17,7 +17,7 @@ import type {
 import { showMessage } from 'siyuan'
 import { putFile } from '@/api'
 import { createCanvasNode, upsertCanvasNode } from '@/canvas/document'
-import { buildNebulaUri } from '@/canvas/file-target-resolution'
+import { buildLocalFsUri } from '@/canvas/file-target-resolution'
 import { searchCanvasFilePickerTargets } from '@/canvas/file-picker-dialog'
 import { writeWorkspaceImageFile } from '@/canvas/workspace-image-files'
 
@@ -274,7 +274,7 @@ export function createCanvasEditorFilePickerActions(options: CanvasEditorFilePic
       return
     }
 
-    // 网盘文件：option.path 已是 nebula://<mount>/<path>，直接落库
+    // 本机存储文件：option.path 已是 localfs://<绝对路径>，直接落库
     const node = createFileNodeAtViewport(board.value, viewport)
     node.file = option.kind === 'block' && option.blockId
       ? option.blockId
@@ -302,23 +302,24 @@ export function createCanvasEditorFilePickerActions(options: CanvasEditorFilePic
   }
 
   /**
-   * 把网盘文件插入画布。
+   * 把「本机存储」文件插入画布。
    *
-   * 与「选择器」不同，网盘文件由侧边栏/设置面板直接传入，不需要走模糊搜索，
-   * 因此单列一个入口。落库时统一写 `nebula://<mount>/<path>`，
-   * 解析链路（file-target-resolution）会把它识别为 kind === 'nebula'。
+   * 两条入口共用：① 选择器对话框点「插入」② 从「本机存储」文件树**拖拽**进来。
+   * 落库统一写 `localfs://<绝对路径>`，
+   * 解析链路（file-target-resolution）会把它识别为 kind === 'localfs'。
+   *
+   * @param fsPath 本机存储上的**绝对路径**（如 /vol1/1000/照片/a.png）
    */
-  async function insertNebulaFileNode(
-    mount: string,
-    nebulaPath: string,
+  async function insertLocalFsFileNode(
+    fsPath: string,
     stagePoint?: { x: number, y: number },
   ) {
-    if (!mount || !nebulaPath) {
+    if (!fsPath || !String(fsPath).trim()) {
       return null
     }
 
     const node = createFileNodeAtViewport(board.value, viewport, stagePoint)
-    node.file = buildNebulaUri(mount, nebulaPath)
+    node.file = buildLocalFsUri(fsPath)
 
     commitDocument(upsertCanvasNode(state.document, node))
     selectNode(node.id)
@@ -360,7 +361,7 @@ export function createCanvasEditorFilePickerActions(options: CanvasEditorFilePic
   return {
     closeFilePickerDialog,
     handleClipboardImagePaste,
-    insertNebulaFileNode,
+    insertLocalFsFileNode,
     insertSiyuanAssetNode,
     openFilePickerDialog,
     selectFilePickerResult,

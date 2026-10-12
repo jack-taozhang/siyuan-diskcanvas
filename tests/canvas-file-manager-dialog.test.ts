@@ -369,7 +369,7 @@ describe('模态框层级高于工具条', () => {
       'CanvasFileManagerDialog.vue',
       'CanvasAssetPickerDialog.vue',
       'CanvasCreateEdgeDialog.vue',
-      'CanvasNebulaPickerDialog.vue',
+      'CanvasLocalFsPickerDialog.vue',
     ]
     for (const dialog of dialogs) {
       const source = readFileSync(resolve(CANVAS_DIR, dialog), 'utf-8')

@@ -2,7 +2,7 @@
   "name": "siyuan-diskcanvas",
   "author": "zhangtao",
   "url": "https://github.com/jack-taozhang/siyuan-diskcanvas",
-  "version": "0.2.24",
+  "version": "0.2.32",
   "minAppVersion": "2.10.14",
   "disabledInPublish": true,
   "backends": [
@@ -17,12 +17,12 @@
     "browser-desktop"
   ],
   "displayName": {
-    "default": "DiskCanvas",
-    "zh_CN": "DiskCanvas 盘绘"
+    "default": "盘绘",
+    "zh_CN": "盘绘"
   },
   "description": {
-    "default": "DiskCanvas gives SiYuan an infinite canvas: lay out netdisk (NebulaDisk) files, SiYuan notes and internal assets side by side, connect them with edges, and export a PNG. Note cards show their title and outline, .canvas files embed into notes as read-only previews, and netdisk files can be dragged straight from the netdisk plugin tree onto the canvas. Reuses the netdisk plugin connection, so there is nothing to configure twice.",
-    "zh_CN": "盘绘给思源加一张无限画布：把网盘（NebulaDisk）文件、思源笔记与内部资源铺在一起，用连线梳理关系，并可一键导出 PNG。笔记卡片默认只显示标题与大纲，.canvas 可作为只读预览块嵌进笔记正文，网盘文件也能从网盘插件文件树直接拖入画布。网盘连接直接复用网盘插件，无需在画布侧重复配置。"
+    "default": "An infinite canvas for SiYuan: lay out local files, SiYuan notes and internal assets side by side, connect them with edges, and export a PNG. Note cards show their title and outline, .canvas files embed into notes as read-only previews, and local files can be dragged straight from the Local Storage plugin tree onto the canvas. Reuses the Local Storage plugin, so there is nothing to configure twice.",
+    "zh_CN": "盘绘给思源加一张无限画布：把本机文件、思源笔记与内部资源铺在一起，用连线梳理关系，并可一键导出 PNG。笔记卡片默认只显示标题与大纲，.canvas 可作为只读预览块嵌进笔记正文，本机文件也能从「本机存储」插件文件树直接拖入画布。文件读取直接复用「本机存储」插件，无需在画布侧重复配置。"
   },
   "readme": {
     "default": "README.md",
@@ -33,8 +33,9 @@
     "canvas",
     "画布",
     "diskcanvas",
-    "nebula",
-    "网盘",
-    "board"
+    "board",
+    "localfs",
+    "本机存储",
+    "本地文件"
   ]
 }

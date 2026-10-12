@@ -69,30 +69,6 @@ function toImageSource(target: PreviewInput): string | undefined {
 /** 图片扩展名（用于判断「思源资源」到底是不是图片）。 */
 const IMAGE_FILE_PATTERN = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)$/i
 
-/**
- * 把网盘目标的「挂载点 + 路径」拼成用于显示的完整路径。
- *
- * 例：`mount = "Docker操作"`、`nebulaPath = "/照片/a.png"` → `"Docker操作/照片/a.png"`。
- * 容错：挂载点可能有前后斜杠；路径可能没前导斜杠。
- */
-function buildNebulaDisplayPath(target: PreviewInput): string {
-  const mount = ('mount' in target && typeof target.mount === 'string')
-    ? target.mount.trim().replace(/^\/+|\/+$/g, '')
-    : ''
-  const nebulaPath = ('nebulaPath' in target && typeof target.nebulaPath === 'string')
-    ? target.nebulaPath.trim()
-    : ''
-
-  if (!mount) {
-    return nebulaPath
-  }
-  if (!nebulaPath || nebulaPath === '/') {
-    return mount
-  }
-
-  return `${mount}/${nebulaPath.replace(/^\/+/, '')}`
-}
-
 function getFileBadge(target: PreviewInput): string {
   const pathStr = ('path' in target && typeof target.path === 'string') ? target.path : ''
   if (!pathStr)
@@ -219,35 +195,24 @@ export function createCanvasFileTargetPreview(target: PreviewInput): CanvasFileT
         kind: 'file',
       }
     }
-    case 'nebula':
+    case 'localfs':
       /**
-       * ★ 网盘文件节点不显示 helper 文案 ★
+       * ★ 本机存储文件节点不显示 helper 文案 ★
        *
-       * 这里曾经落到 default 分支，于是卡片上多了一行英文
-       * `Double click to open`（用户反馈：「去掉画布上面网盘文件上的双击打开 英文提示」）。
-       *
-       * 两处都要清干净：
+       * 沿用网盘卡片时期的约定（用户曾要求「去掉画布上面网盘文件上的双击打开
+       * 英文提示」），两处都要清干净：
        *   1. helper 给空串 —— 卡片组件用 `v-if="showHelper"` 控制，
        *      但有的调用方不传 showHelper；空串 + `.filter(Boolean)` 双保险，
        *      避免渲染出一个只占位的空行。
-       *   2. `shouldShowFileCardHelper` 里把 nebula 也列入「无 helper」的 kind
-       *      （见 CanvasWorkspace.vue），这是真正决定显不显示的那一处。
+       *   2. `shouldShowFileCardHelper` 里对空 helper 一律不显示
+       *      （见 CanvasWorkspace.vue）。
        *
-       * badge 保留扩展名（如下载型 zip / pdf 一眼可辨），detail 给网盘路径。
+       * badge 保留扩展名（zip / pdf 一眼可辨），detail 给**完整绝对路径**
+       * —— 本机存储本来就是一个绝对路径，不像网盘那样需要再拼挂载点。
        */
       return {
         badge: getFileBadge(target),
-        /**
-         * ★ 显示路径要带**挂载点**（第 11 轮 #12）★
-         *
-         * 用户要求：「画布中的网盘文件 显示的路径中需要增加 挂载点位置显示」。
-         * 只给 `nebulaPath`（如 `/照片/a.png`）时，看不出它在哪个挂载点下 ——
-         * 不同挂载点下完全可能重名。
-         *
-         * 拼成 `<挂载点><路径>`（去掉挂载点两端多余斜杠，再补一个 `/`），
-         * 得到形如 `Docker操作/照片/a.png` 的完整定位。
-         */
-        detail: 'nebulaPath' in target ? buildNebulaDisplayPath(target) : target.path,
+        detail: 'fsPath' in target ? target.fsPath : target.path,
         headline: target.title,
         helper: '',
         kind: 'file',

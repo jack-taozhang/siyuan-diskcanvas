@@ -20,8 +20,8 @@ import {
   createCanvasFileTargetPreview,
   loadCanvasTargetPreview,
 } from "@/canvas/file-target-preview"
-import { getNebulaClient } from "@/canvas/nebula-client-provider"
-import { formatSize, pickViewer } from "@/resources/nebula-client"
+import { getLocalFsClient } from "@/canvas/localfs-client-provider"
+import { formatFileSize, isImagePath } from "@/canvas/localfs-client"
 import {
   resolveCanvasFileTarget,
   type ResolvedCanvasBlockTarget,
@@ -313,51 +313,53 @@ function extractImageSourceFromPreviewHtml(previewHtml: string): string | undefi
   }
 
   /**
-   * 网盘文件预览。
+   * 本机存储文件预览（补大小 / 图片缩略图）。
    *
-   * 拿不到 client（未配置 / 未登录）时不报错，退回纯文件名卡片 ——
-   * 画布本身必须始终可用，网盘连接是增强而非前置。
+   * ★ 拿不到 client 时不报错 ★
+   *   退回纯文件名卡片 —— 画布本身必须始终可用，
+   *   「本机存储」插件在不在、服务连不连得上，都只是增强。
+   *
+   * ★ 缩略图只对图片取 ★
+   *   CAD / PDF / Office / 视频交给各自的预览器打开，
+   *   不在卡片里内联渲染 —— 否则一张几百 MB 的图纸会把画布拖死。
+   *   判据是 `isImagePath`（呈现层的决定），**打开通道仍由对方分派**。
    */
-  async function withNebulaPreview(
-    target: Extract<ResolvedCanvasFileTarget, { kind: 'nebula' }>,
+  async function withLocalFsPreview(
+    target: Extract<ResolvedCanvasFileTarget, { kind: 'localfs' }>,
     node: Extract<CanvasNode, { type: 'file' }>,
   ) {
     const base = {
       ...target,
-      detail: `${target.mount}${target.nebulaPath}`,
+      detail: target.fsPath,
       originalFile: node.file,
     }
 
     try {
-      const client = getNebulaClient()
-      if (!client || !client.isConfigured()) {
+      const client = getLocalFsClient()
+      if (!client) {
         return base as typeof base & { thumbnail?: CanvasFileTargetPreview['thumbnail'] }
       }
 
-      // `login` 在接口里是可选的：契约适配器不需要登录（登录归网盘侧）
-      await client.login?.()
-      const stat = await client.stat(target.mount, target.nebulaPath)
-      const detail = `${target.mount}${target.nebulaPath}${stat && typeof stat.size === 'number'
-        ? `  ·  ${formatSize(stat.size)}`
-        : ''}`
+      // probe 只用来补一个文件大小；失败返回 null，不影响卡片
+      const info = await client.probe(target.fsPath)
+      const size = info && typeof info.size === 'number' ? info.size : undefined
+      const detail = size == null ? target.fsPath : `${target.fsPath}  ·  ${formatFileSize(size)}`
 
-      // 只对图片取缩略图。其它类型（PDF / Office / CAD / 视频）交给专属预览器，
-      // 不在卡片里内联渲染——避免（例如）把 200MB 图纸塞进画布。
-      if (pickViewer(target.nebulaPath) === 'image') {
-        const previewUrl = await client.previewUrl(target.mount, target.nebulaPath)
-        if (previewUrl) {
+      if (isImagePath(target.fsPath)) {
+        const url = await client.fileUrl(target.fsPath)
+        if (url) {
           return {
             ...base,
             detail,
-            imageSrc: previewUrl,
-            thumbnail: { src: previewUrl },
+            imageSrc: url,
+            thumbnail: { src: url },
           }
         }
       }
 
       return { ...base, detail }
     } catch (error) {
-      console.warn('[diskcanvas] 网盘文件预览失败:', target.path, error)
+      console.warn('[diskcanvas] 本机存储文件预览失败:', target.path, error)
       return base as typeof base & { thumbnail?: CanvasFileTargetPreview['thumbnail'] }
     }
   }
@@ -409,11 +411,10 @@ function extractImageSourceFromPreviewHtml(previewHtml: string): string | undefi
       }
     }
 
-    // 网盘文件：用 NebulaClient 拉缩略图/详情。
-    // 关键点：预览地址必须经过 client.absolute() —— 容器内 /api/preview 返回的 url
-    // 内嵌的是 docker 服务名（http://nebula:8088/...），浏览器不可达，必须改写成宿主地址。
-    if (resolved.kind === 'nebula') {
-      enriched = await withNebulaPreview(resolved, node)
+    // 本机存储文件：经「本机存储」插件契约补大小 / 缩略图。
+    // 地址一律由对方构造（含同源通道与借用应用的端口），画布只转发。
+    if (resolved.kind === 'localfs') {
+      enriched = await withLocalFsPreview(resolved, node)
     }
 
     return enriched

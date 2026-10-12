@@ -41,16 +41,21 @@
  *     在独立页里改动也会写回同一份文件（带"内容没变就不写"的去重，
  *     与 `index.ts` 的 `persistCanvasData` 同款，避免触发宿主重载抖动）。
  *
- *  4. **另一个插件的能力（网盘）** —— 通过 `window.opener` 桥接
- *     网盘插件的对外契约 `window.__nebuladiskPlugin` **只存在于思源页面里**。
+ *  4. **另一个插件的能力（本机存储）** —— 通过 `window.opener` 桥接
+ *     「本机存储」插件的对外契约 `window.__localfsPlugin` **只存在于思源页面里**。
  *     本页是由思源页面里的按钮 `window.open` 打开的，**同源**，因此
- *     `window.opener.__nebuladiskPlugin` 可直接取用：
- *       · `.external` → 挂到本页 window 上，画布走**契约路径**（含 URL 构造，
- *         满足约束 C-4：URL 一律由网盘侧构造，本侧只转发）
- *       · 插件实例本身 → 塞进桩的 `app.plugins`，双击网盘文件时
- *         `getNebulaPlugin().openFile()` 照常可用
+ *     `window.opener.__localfsPlugin` 可直接取用，整包挂到本页 window 上
+ *     —— 画布走**契约路径**（含 URL 构造，满足约束：地址一律由本机存储侧
+ *     构造，本侧只转发），与在思源里打开独立页时**完全同一条链路、零特判**。
+ *
+ *     ★ 为什么现在不需要 `app.plugins` 了 ★
+ *       网盘时代画布是按插件名反射找实例（`app.plugins`）再调 `openFile()`。
+ *       本机存储这条链路把 `openFile` 也收进了契约（`external.openFile`），
+ *       所以画布只需要 `window.__localfsPlugin.external` 一个入口，
+ *       桩里的 `app` 不再承担"找插件"的职责（只作为 `openTab({app})` 的占位）。
+ *
  *     取不到时（例如用户把 URL 复制到一个全新页签）自动降级：
- *     网盘相关操作给出提示，其余功能一切正常。
+ *     本机存储相关操作给出提示，其余功能一切正常。
  */
 
 import PluginInfoString from "@/../plugin.json"
@@ -324,13 +329,21 @@ async function readPluginData(): Promise<CanvasPluginData> {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * 第 3 步：网盘能力桥（`window.opener`）
+ * 第 3 步：本机存储能力桥（`window.opener`）
  * ══════════════════════════════════════════════════════════════════════════ */
 
-interface NebulaPluginLike {
+/**
+ * `window.__localfsPlugin` 的最小形状（对方仓库 `siyuan-localfs/src/external.js`）。
+ *
+ * ★ 注意 `openFile` **不在**这一层 ★
+ *   本机存储契约把"打开文件"也收进了 `external` 里
+ *   （`external.openFile(item)`），所以这里只需要转发整包 `{ external, name }`；
+ *   画布那侧读的正是 `window.__localfsPlugin.external`。
+ *   （网盘时代它把实例方法挂在插件对象上，才需要额外透传 `openFile`。）
+ */
+interface LocalFsPluginApi {
   external?: unknown
   name?: string
-  openFile?: (item: Record<string, unknown>, opts?: Record<string, unknown>) => unknown
 }
 
 interface OpenerBridge {
@@ -339,27 +352,26 @@ interface OpenerBridge {
   /** 诊断用：原始原因，便于真机排查（写进 `window.__dcStandalone`） */
   reason: string
   /**
-   * ★ 每次调用都去 opener **重新取**当前的网盘插件实例 ★
+   * ★ 每次调用都去 opener **重新取**当前的本机存储契约对象 ★
    *
-   * 为什么不在这里把对象存下来：网盘插件**每次重载都会换一个新对象**
-   * （`window.__nebuladiskPlugin` 被重新赋值）。一旦缓存住旧对象，
-   * 插件升级/重载之后本页就一直在调**旧代码** —— 实测踩过：
-   * 网盘侧修好了 `webUrl`（原来漏 await 会返回字符串 "[object Promise]"），
-   * 而独立页仍然拿到占位串，因为它在加载时就把旧契约钉住了。
+   * 为什么不在这里把对象存下来：本机存储插件**每次重载都会换一个新对象**
+   * （`window.__localfsPlugin` 被重新赋值，`external` 也是新建的）。
+   * 一旦缓存住旧对象，插件升级/重载之后本页就一直在调**旧代码** ——
+   * 网盘那条链路实测踩过（对方修好了 `webUrl`，独立页仍拿旧结果）。
    *
    * 取用成本是一次属性读取（同源直接访问），可以忽略；
    * 换来的是"插件重载后本页自动跟上"。
    */
-  getPlugin: () => NebulaPluginLike | null
+  getApi: () => LocalFsPluginApi | null
 }
 
 /**
- * 从打开本页的思源窗口取网盘插件实例。
+ * 从打开本页的思源窗口取「本机存储」契约。
  *
  * ★ 为什么这条路是**正确**的而不是"绕开契约" ★
- *   网盘对外契约的约束 C-4 要求「URL 一律由网盘侧构造，消费方只转发」。
- *   通过 `opener` 拿到的就是**网盘插件自己的契约对象**，
- *   画布依旧只做转发 —— 契约本身一行没改，C-4 得到满足。
+ *   本机存储对外契约的硬约束是「地址一律由本机存储侧构造，消费方只转发」。
+ *   通过 `opener` 拿到的就是**插件自己挂的那个契约对象**，
+ *   画布依旧只做转发 —— 契约本身一行没改，约束得到满足。
  *
  * ★ 为什么可以跨窗口用 ★
  *   本页与思源页面**同源**（都由同一个内核在同一个 host:port 上提供），
@@ -372,16 +384,16 @@ function readOpenerBridge(): OpenerBridge {
   try {
     opener = window.opener
   } catch {
-    return { getPlugin: () => null, opener: null, reason: "opener-inaccessible" }
+    return { getApi: () => null, opener: null, reason: "opener-inaccessible" }
   }
 
   if (!opener || opener.closed) {
-    return { getPlugin: () => null, opener: null, reason: "no-opener" }
+    return { getApi: () => null, opener: null, reason: "no-opener" }
   }
 
-  const getPlugin = (): NebulaPluginLike | null => {
+  const getApi = (): LocalFsPluginApi | null => {
     try {
-      const candidate = (opener as unknown as Record<string, NebulaPluginLike | undefined>).__nebuladiskPlugin
+      const candidate = (opener as unknown as Record<string, LocalFsPluginApi | undefined>).__localfsPlugin
       if (!candidate || typeof candidate !== "object") {
         return null
       }
@@ -393,9 +405,10 @@ function readOpenerBridge(): OpenerBridge {
   }
 
   return {
-    getPlugin,
+    getApi,
     opener,
-    reason: getPlugin() ? "ok" : "nebula-plugin-absent",
+    // 只有"对象在、且真带了 external"才算桥通了 —— 否则画布拿到的是空壳
+    reason: getApi()?.external ? "ok" : "localfs-plugin-absent",
   }
 }
 
@@ -440,7 +453,6 @@ function createEventBus() {
  */
 function createStandalonePlugin(
   data: CanvasPluginData,
-  bridge: OpenerBridge,
   i18n: Record<string, string>,
 ): StandalonePluginStub {
   const eventBus = createEventBus()
@@ -480,17 +492,13 @@ function createStandalonePlugin(
      */
     isMobile: false,
     /**
-     * `app` 只需要 `plugins` 一项 —— 画布用它找网盘插件实例
-     * （见 `use-canvas-editor.ts` 的 `getNebulaPlugin`）。
-     * 用 **getter** 而不是数组字面量：数组会钉住当时的那个插件实例，
-     * 网盘插件重载后就找不到新的了（同一个陈旧引用问题）。
+     * `app` 只是 `openTab({app, …})` 的占位（`siyuan-module-shim` 的开页实现
+     * 不读它）。★ 网盘时代它带一个 `plugins` **getter**，供画布按插件名
+     * 反射找网盘实例；改用本机存储契约后，`openFile` 已经收进
+     * `window.__localfsPlugin.external`，画布不再需要 `app.plugins`，
+     * 于是这一项随之退化成空对象。
      */
-    app: {
-      get plugins() {
-        const current = bridge.getPlugin()
-        return current ? [current] : []
-      },
-    },
+    app: {},
     eventBus,
     customBlockRenders: {},
 
@@ -610,27 +618,27 @@ async function main(): Promise<void> {
   const bridge = readOpenerBridge()
 
   /**
-   * ★ 把网盘契约挂到**本页** window 上 —— 用 **getter**，不拷对象 ★
+   * ★ 把本机存储契约整包挂到**本页** window 上 —— 用 **getter**，不拷对象 ★
    *
-   *   画布的 `getNebulaExternalContract()` 只认 `window.__nebuladiskPlugin`，
+   *   画布的 `getLocalFsExternalContract()` 只认 `window.__localfsPlugin`，
    *   挂上之后它走的就是**和思源里完全相同的那条契约路径**，无需任何特判。
    *
    *   但必须是"实时转发"而不是"把对象存下来"：
-   *   网盘插件每次重载都会替换 `opener.__nebuladiskPlugin`，
-   *   存下来就会一直用旧对象（实测踩过：网盘侧修好 webUrl 后本页仍拿旧结果）。
+   *   本机存储插件每次重载都会替换 `opener.__localfsPlugin`（`external` 也是新建的），
+   *   存下来就会一直用旧对象（网盘那条链路实测踩过：对方修好地址构造后本页仍拿旧结果）。
    *
    *   只在真有 opener 时定义 —— 没有 opener 时不要伪造一个空对象，
-   *   让 `getNebulaExternalContract()` 走它自己的"没有契约"分支（返回 null），
-   *   上层据此给出"网盘插件未检测到"的提示。
+   *   让 `getLocalFsExternalContract()` 走它自己的"没有契约"分支（返回 null），
+   *   上层据此给出"未检测到本机存储插件"的提示。
    */
   if (bridge.opener) {
-    Object.defineProperty(window, "__nebuladiskPlugin", {
+    Object.defineProperty(window, "__localfsPlugin", {
       configurable: true,
-      get: () => bridge.getPlugin() ?? undefined,
+      get: () => bridge.getApi() ?? undefined,
     })
   }
 
-  const plugin = createStandalonePlugin(pluginData, bridge, i18n)
+  const plugin = createStandalonePlugin(pluginData, i18n)
   bindPlugin(plugin as unknown as Plugin)
 
   /**
@@ -666,17 +674,17 @@ async function main(): Promise<void> {
   }
 
   mountCanvasApp(mountEl, bootstrap, (title: string) => {
-    document.title = title ? `${title} · DiskCanvas` : "DiskCanvas"
+    document.title = title ? `${title} · 盘绘` : "盘绘"
   })
 
   /**
    * 诊断出口（只读，不改变行为）。
-   * 真机验证脚本靠它确认"样式注入了几条 / 主题对不对 / 网盘桥通没通"——
+   * 真机验证脚本靠它确认"样式注入了几条 / 主题对不对 / 本机存储桥通没通"——
    * 没有它就只能靠肉眼看，那种结论不可靠。
    */
   ;(window as unknown as Record<string, unknown>).__dcStandalone = {
-    nebulaBridged: Boolean(bridge.getPlugin()),
-    nebulaBridgeReason: bridge.reason,
+    localFsBridged: Boolean(bridge.getApi()?.external),
+    localFsBridgeReason: bridge.reason,
     path,
     pluginName: PLUGIN_NAME,
     snippetCount: snippets.length,

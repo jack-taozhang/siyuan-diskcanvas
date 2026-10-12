@@ -39,7 +39,8 @@ import {
   watch,
 } from "vue"
 import { resolveCanvasInteractionPolicy } from "@/canvas/canvas-interaction-policy"
-import { getNebulaClient } from "@/canvas/nebula-client-provider"
+import { localFsUnavailableMessage } from "@/canvas/localfs-client"
+import { getLocalFsClient } from "@/canvas/localfs-client-provider"
 // 独立页 URL 构造函数：独立网页里双击子画布时，另开一个独立网页页签要用到。
 // ★ 与工具栏「独立打开」共用同一份，保证"生成 URL / 解析 URL"严格互逆。
 import { buildStandalonePageUrl } from "@/standalone/standalone-url"
@@ -141,16 +142,6 @@ const SELECTION_COLORS = [
   "1", "2", "3", "4", "5", "6",
   "7", "8", "9", "10", "11", "12",
 ] as const
-
-/**
- * 提供「页签打开网盘文件」能力的插件注册名。
- *
- * ★ 为什么是硬编码字符串 ★
- *   这是**对方插件的身份**，不是本插件可配置项 —— 它写在对方的 plugin.json 里，
- *   在思源里是稳定标识（用户改不了）。写成常量便于全局检索与说明来由，
- *   但不适合做成设置项（用户改了只会坏事）。
- */
-const NEBULA_PLUGIN_NAME = "siyuan-nebuladisk"
 
 export function useCanvasEditor(
   plugin: CanvasPluginBridge,
@@ -1097,7 +1088,7 @@ export function useCanvasEditor(
    *   `isEmbedMode` 会参与**能力矩阵**（翻成一组只读能力）；
    *   而独立页是**完全可编辑**的，它**不进** `resolveCanvasInteractionPolicy`。
    *   它只影响「与宿主强绑定的动作该怎么做」这一件事，
-   *   目前唯一一处：双击网盘卡片时改用单独网页打开（见 `activateNode`）。
+   *   目前唯一一处：双击本机存储卡片时改用单独网页打开（见 `activateNode`）。
    *
    *   为什么不塞进能力矩阵：矩阵语义是"能不能做"，而这里是"怎么做"。
    *   混进去会让 `editDocument` 之类的能力多出一个莫名其妙的信号源。
@@ -1236,7 +1227,7 @@ export function useCanvasEditor(
   const {
     closeFilePickerDialog,
     handleClipboardImagePaste,
-    insertNebulaFileNode,
+    insertLocalFsFileNode,
     insertSiyuanAssetNode,
     openFilePickerDialog,
     selectFilePickerResult,
@@ -1261,32 +1252,29 @@ export function useCanvasEditor(
   })
 
   /**
-   * ★ 接收「从网盘 dock 拖进来的文件」（第 16 轮 #19）★
+   * ★ 接收「从『本机存储』文件树拖进来的文件」（原网盘拖拽链路的接班人）★
    *
-   * 用户要求：「支持从网盘文件 dock 拖入画布创建插入网盘文件块」。
+   * 拖拽源已经存在（另一个仓库 `siyuan-localfs/src/explorer.js`）：
+   *   **只给文件行开 `draggable`**（目录行不可拖），`dragstart` 时写入：
+   *     · `application/x-localfs-embed` → `{ kind:"file", path, name }`
+   *     · `text/plain`                 → 文件名（保底：某些浏览器没有它就不派发 drop）
+   *   ⇒ 画布侧只差"把它接住"。
    *
-   * 查证结果（另一个仓库 `siyuan-nebuladisk` 的 `src/tree.js`）：
-   *   **拖拽源早就存在** —— 树/列表里的文件行是 `draggable`，`dragstart` 时写入：
-   *     · `application/x-nebuladisk-embed` → `{ kind:"file", mount, path, name, isDir:false }`
-   *     · `text/plain` → 文件名（保底）
-   *   ⇒ **只差画布侧把它接住**。这里那个 `handleStageDrop` 原本是 fork 剥离时
-   *     留下的 `async () => false` **死桩**（模板一直绑着它，所以拖上去毫无反应）。
-   *
-   * ★ 两条必须遵守的约定（网盘插件自己的注释里写明了）★
-   *   1. **各自都要把自己不认的拖拽放过去** —— 只处理 `x-nebuladisk-embed`，
+   * ★ 两条必须遵守的约定（与网盘那条链路完全同款）★
+   *   1. **各自都要把自己不认的拖拽放过去** —— 只处理 `x-localfs-embed`，
    *      其余（系统文件、思源内部拖拽…）一律不 `preventDefault`，
    *      否则会把别人的链路弄坏（实测过"两边都无脑 preventDefault 导致行为错乱"）。
-   *   2. 网盘插件是挂在 **document 的冒泡阶段**处理这个 MIME 的（往思源正文插嵌入块）。
+   *   2. 本机存储插件是挂在 **document** 上处理这个 MIME 的（往思源正文插嵌入块）。
    *      我们已经在画布上接住了，就必须 `stopPropagation()`，
    *      否则同一次拖放会**既建画布节点、又插一个正文嵌入块**。
    */
-  const NEBULA_DND_MIME = "application/x-nebuladisk-embed"
+  const LOCALFS_DND_MIME = "application/x-localfs-embed"
 
-  /** 解析网盘拖拽载荷；不是网盘拖拽（或格式不对）返回 null，交给别人处理。 */
-  function readNebulaDragPayload(event: DragEvent): { mount: string, path: string } | null {
+  /** 解析本机存储拖拽载荷；不是该拖拽（或格式不对）返回 null，交给别人处理。 */
+  function readLocalFsDragPayload(event: DragEvent): { path: string } | null {
     let raw = ""
     try {
-      raw = event.dataTransfer?.getData(NEBULA_DND_MIME) || ""
+      raw = event.dataTransfer?.getData(LOCALFS_DND_MIME) || ""
     } catch {
       // 某些环境下 getData 在非 drop 阶段会抛，安全忽略
       return null
@@ -1299,17 +1287,14 @@ export function useCanvasEditor(
       const parsed = JSON.parse(raw) as {
         isDir?: boolean
         kind?: string
-        mount?: unknown
         path?: unknown
       }
       if (parsed
         && parsed.kind === "file"
         && !parsed.isDir
-        && typeof parsed.mount === "string"
         && typeof parsed.path === "string"
-        && parsed.mount
         && parsed.path) {
-        return { mount: parsed.mount, path: parsed.path }
+        return { path: parsed.path }
       }
     } catch {
       // 非法 JSON —— 不是我们的载荷
@@ -1318,9 +1303,9 @@ export function useCanvasEditor(
     return null
   }
 
-  function nebulaDragOver(event: DragEvent) {
+  function localFsDragOver(event: DragEvent) {
     const types = event.dataTransfer?.types
-    if (!types || !Array.from(types).includes(NEBULA_DND_MIME)) {
+    if (!types || !Array.from(types).includes(LOCALFS_DND_MIME)) {
       // ★ 不认的拖拽**不要** preventDefault，放过去
       return
     }
@@ -1332,13 +1317,13 @@ export function useCanvasEditor(
     }
   }
 
-  async function nebulaDrop(event: DragEvent): Promise<boolean> {
-    const payload = readNebulaDragPayload(event)
+  async function localFsDrop(event: DragEvent): Promise<boolean> {
+    const payload = readLocalFsDragPayload(event)
     if (!payload) {
       return false
     }
 
-    // 见上方约定 2：挡住网盘插件挂在 document 上的处理器，避免重复插入
+    // 见上方约定 2：挡住本机存储插件挂在 document 上的处理器，避免重复插入
     event.stopPropagation()
 
     const rect = stageRef.value?.getBoundingClientRect()
@@ -1346,12 +1331,12 @@ export function useCanvasEditor(
       ? { x: event.clientX - rect.left, y: event.clientY - rect.top }
       : undefined
 
-    await insertNebulaFileNode(payload.mount, payload.path, stagePoint)
+    await insertLocalFsFileNode(payload.path, stagePoint)
     return true
   }
 
-  const handleStageDragOver = nebulaDragOver
-  const handleStageDrop = nebulaDrop
+  const handleStageDragOver = localFsDragOver
+  const handleStageDrop = localFsDrop
 
   function toggleInspector() {
     inspectorExpanded.value = !inspectorExpanded.value
@@ -1368,81 +1353,43 @@ export function useCanvasEditor(
   }
 
   /**
-   * 取 siyuan-nebuladisk 插件实例（用于「双击网盘文件 → 在页签中打开」）。
-   *
-   * ★ 为什么走插件实例的 openFile()，而不是自己 openTab ★
-   *   网盘页签的注册键是 `${网盘插件名}${TAB_TYPE}`，且 init 里要 new 它自己的
-   *   Viewer（负责分派 OnlyOffice / kkFileView / CAD / 图片 / 视频 等通道）。
-   *   画布侧若自己拼 `custom.id`，一旦对方改常量就静默打不开；
-   *   而 `openFile(item)` 是对方**公开的实例方法**，内部自己拼 key、自己定 title，
-   *   与「在网盘 dock 里双击文件」走的是**同一条**代码路径 —— 行为天然一致。
-   *
-   * ★ 拿不到就返回 null，绝不抛 ★
-   *   网盘插件可能没装 / 被禁用 / 版本过旧没有 openFile。
-   *   此时画布必须优雅降级（给出提示），而不是让双击炸掉整个页面。
-   */
-  function getNebulaPlugin(): { openFile?: (item: Record<string, unknown>, opts?: Record<string, unknown>) => unknown } | null {
-    const app = (plugin as { app?: { plugins?: unknown[] } }).app
-    const list = app?.plugins
-    if (!Array.isArray(list)) {
-      return null
-    }
-    const found = list.find(
-      (candidate) => (candidate as { name?: string })?.name === NEBULA_PLUGIN_NAME,
-    )
-    return (found as ReturnType<typeof getNebulaPlugin>) ?? null
-  }
-
-  /**
-   * 在**单独网页**里打开网盘文件（独立页双击网盘卡片时走这条）。
+   * 在**单独网页**里打开本机存储文件（独立页双击卡片时走这条）。
    *
    * ★ 地址从哪来 ★
-   *   网盘契约的 `webUrl(mount, path, name)` —— 网盘侧按类型路由出
-   *   「浏览器可直接打开的地址」（CAD 深链 / `/api/raw` 签名直链 / kkFileView 预览页），
-   *   并顺手做了「容器内主机名 → 浏览器可达地址」的改写。
-   *   画布侧**一个字节的 URL 都不自己拼**（约束 C-4）。
+   *   契约的 `previewUrl(path)` —— 本机存储侧按类型给出「浏览器可直接打开的地址」
+   *   （CAD 深链 / 飞牛官方「Office 文档」预览页 / 原生直链），
+   *   并顺手做好同源通道与"借用应用端口"的改写。
+   *   ⇒ 画布侧**一个字节的 URL 都不自己拼**（与网盘那条链路的 C-4 约束同义）。
    *
-   * ★ 为什么拿不到能力时宁可报错也不猜 ★
-   *   老版本网盘没有 `webUrl`。若退回 `previewUrl`：
-   *     · office 会走 OnlyOffice —— 那**不是无状态查看页**，每次打开都可能
-   *       触发一次回写会话（网盘侧自己的注释里写明了这一点）；
-   *     · 原生类型（图片/pdf/文本）会绕一层转换，慢且可能转失败。
-   *   结果是一个"看起来打开了但不是用户想要的东西"的页面，
-   *   而报错至少能把原因说清楚（让用户去升级网盘插件）。
-   *
-   * @returns 是否真的开了窗（false ⇒ 调用方按"没打开"处理）
+   * ★ 为什么用 `window.open` 而不是 `location.href` ★
+   *   画布留在原页，用户回来还能继续编辑。
+   *   双击是用户手势，不会被弹窗拦截；真被拦了也给出提示，不静默失败。
    */
-  async function openNebulaInBrowser(
-    target: { mount: string, nebulaPath: string },
-    fileName: string,
-  ): Promise<boolean> {
-    const client = getNebulaClient(getPluginSettings().nebula)
+  async function openLocalFsInBrowser(fsPath: string): Promise<boolean> {
+    const client = getLocalFsClient()
     if (!client) {
-      showMessage(t("messageNebulaPluginMissing"), 4000, "error")
-      return false
-    }
-
-    if (typeof client.webUrl !== "function") {
-      showMessage(t("messageNebulaWebOpenUnsupported"), 5000, "error")
+      showMessage(
+        localFsUnavailableMessage(t, {
+          absent: "messageLocalFsPluginMissing",
+          outdated: "messageLocalFsPluginOutdated",
+        }),
+        5000,
+        "error",
+      )
       return false
     }
 
     try {
-      const url = await client.webUrl(target.mount, target.nebulaPath, fileName)
-      /**
-       * 用 `window.open` 开新页签而不是 `location.href`：
-       * 画布留在原页，用户回来还能继续编辑（与「在独立网页中打开画布」同一个取向）。
-       * 双击是用户手势，不会被弹窗拦截；真被拦了也给出提示，不静默失败。
-       */
+      const url = await client.previewUrl(fsPath)
       const opened = window.open(url, "_blank")
       if (!opened) {
-        showMessage(t("messageNebulaWebOpenBlocked"), 5000, "error")
+        showMessage(t("messageLocalFsWebOpenBlocked"), 5000, "error")
         return false
       }
       return true
     } catch (error) {
       showMessage(
-        t("messageNebulaWebOpenFailed", {
+        t("messageLocalFsWebOpenFailed", {
           error: error instanceof Error ? error.message : String(error),
         }),
         5000,
@@ -1458,7 +1405,7 @@ export function useCanvasEditor(
    * ★ 为什么必须是"另一个独立网页"，而不是 `plugin.openCanvasTab` ★
    *   独立页本身跑在 `window.opener` 之外的普通标签页里（`standalone.html`），
    *   没有思源的页签体系。`openCanvasTab` 会把新页签开在**思源那个窗口**里，
-   *   用户明明在独立窗口里双击，焦点却跳去思源窗口 —— 与 `openNebulaInBrowser`
+   *   用户明明在独立窗口里双击，焦点却跳去思源窗口 —— 与 `openLocalFsInBrowser`
    *   要规避的是同一个问题。
    *
    * ★ URL 复用 `buildStandalonePageUrl`（工具栏「独立打开」同一个构造函数）★
@@ -1467,8 +1414,8 @@ export function useCanvasEditor(
    *     只有 `Last-Modified`，不加版本号可能命中启发式缓存里的旧页面。
    *
    * ★ 与工具栏按钮的区别：**不加 `noopener`** —— 理由是同一个：
-   *   独立页要靠 `window.opener.__nebuladiskPlugin` 复用网盘能力，
-   *   加了 `noopener` 等于把网盘功能一起关掉（功能依赖，非安全疏忽）。
+   *   独立页要靠 `window.opener.__localfsPlugin` 复用「本机存储」能力，
+   *   加了 `noopener` 等于把本机存储功能一起关掉（功能依赖，非安全疏忽）。
    */
   function openCanvasInStandaloneTab(path: string): boolean {
     const pluginName = (plugin as unknown as { name?: string }).name
@@ -1493,7 +1440,7 @@ export function useCanvasEditor(
    *
    * 目前支持两类：
    *   · 笔记节点（kind=block）→ 跳回思源打开该文档（并高亮目标块）
-   *   · 网盘文件节点（kind=nebula）→ 在页签中打开（复用网盘插件的打开逻辑）
+   *   · 本机存储文件（kind=localfs）→ 在页签中打开（复用「本机存储」的打开逻辑）
    *
    * @returns 是否真的执行了「打开」（false = 该节点没有可打开的目标，交给调用方处理）
    */
@@ -1585,7 +1532,7 @@ export function useCanvasEditor(
        *   子画布，应该是用单独新网页打开。就是说双击子画布，如果是在思源的画布页签
        *   里面就另开一个思源的画布页签，如果是独立网页打开的就另开一个独立网页的页签。」
        *
-       * ⇒ 与 `nebula` 分支**完全同构**的两种打开方式：
+       * ⇒ 与 `localfs` 分支**完全同构**的两种打开方式：
        *   · 思源页签里（`!isStandaloneMode`）
        *       → `plugin.openCanvasTab({ path })` ⇒ 另开一个**思源画布页签**
        *   · 独立网页里（`isStandaloneMode`）
@@ -1593,7 +1540,7 @@ export function useCanvasEditor(
        *
        *   为什么独立页里不能调 `plugin.openCanvasTab`：那 API 归思源宿主管，
        *   会把新页签开在**思源那个窗口**里 —— 用户正在独立窗口里干活，焦点却跑去
-       *   另一个窗口，与操作预期正好相反（与 `openNebulaInBrowser` 同一个道理）。
+       *   另一个窗口，与操作预期正好相反（与 `openLocalFsInBrowser` 同一个道理）。
        */
       if (resolved.kind === "canvas") {
         if (isStandaloneMode) {
@@ -1608,46 +1555,53 @@ export function useCanvasEditor(
         return true
       }
 
-      if (resolved.kind === "nebula") {
-        const fileName = resolved.nebulaPath.split("/").filter(Boolean).pop() ?? resolved.title
+      if (resolved.kind === "localfs") {
+        const fileName = resolved.fsPath.split("/").filter(Boolean).pop() ?? resolved.title
 
         /**
-         * ★★ 独立网页里：双击网盘卡片 = 用**单独网页**打开该网盘文件 ★★
-         *
-         * 用户要求：「网页打开画布编辑时，双击网盘卡片，通过单独网页打开对应的网盘文件。」
+         * ★★ 独立网页里：双击卡片 = 用**单独网页**打开该文件 ★★
          *
          * 为什么不能沿用下面的 `openFile()`：
-         *   那是网盘插件在**思源里开一个预览页签**的方法。独立页没有思源的页签体系，
-         *   调它只会把预览页签开在**思源那个窗口**里 —— 用户正在独立窗口里干活，
-         *   却看到焦点跑去了另一个窗口，与操作预期正好相反。
+         *   那是「本机存储」在**思源里开一个预览页签**的方法。独立页没有思源的
+         *   页签体系，调它只会把预览页签开在**思源那个窗口**里 ——
+         *   用户正在独立窗口里干活，焦点却跑去另一个窗口，与操作预期正好相反。
          *
-         * 处置：改走网盘契约的 `webUrl()` —— 网盘侧已经有一个专门的调度器
-         *   （`browserViewUrl`），按类型给出「浏览器可直接打开」的地址：
-         *     · CAD → cad-viewer 深链
-         *     · pdf/图片/视频/音频/文本 → `/api/raw` 签名直链（零转换，最快）
-         *     · Office / 压缩包 / 其它 → kkFileView 在线预览页
-         *   地址改写（容器内主机名 → 浏览器可达）也在网盘侧完成。
-         *   ⇒ 我们这边**只负责开窗**，一个字节的 URL 都不自己拼（约束 C-4）。
-         *
-         * 拿不到这个能力时**明确报错**，不退回 previewUrl "猜一个" ——
-         * 老版本网盘的 previewUrl 对 office 会给错通道，猜出来的结果比报错更难排查。
+         * 处置：改走契约的 `previewUrl()` —— 本机存储侧按类型给出
+         *   「浏览器可直接打开」的地址（CAD 深链 / 飞牛官方「Office 文档」预览页 /
+         *   原生直链），同源通道与借用应用端口的改写也在那边完成。
+         *   ⇒ 我们这边**只负责开窗**，一个字节的 URL 都不自己拼。
          */
         if (isStandaloneMode) {
-          return await openNebulaInBrowser(resolved, fileName)
+          return await openLocalFsInBrowser(resolved.fsPath)
         }
 
-        const nebulaPlugin = getNebulaPlugin()
-        if (!nebulaPlugin || typeof nebulaPlugin.openFile !== "function") {
-          showMessage(t("messageNebulaPluginMissing"), 4000, "error")
+        const client = getLocalFsClient()
+        if (!client) {
+          showMessage(
+        localFsUnavailableMessage(t, {
+          absent: "messageLocalFsPluginMissing",
+          outdated: "messageLocalFsPluginOutdated",
+        }),
+        5000,
+        "error",
+      )
           return false
         }
-        // 与网盘 dock 双击文件完全同一条路径：交给对方的 openFile 决定用哪个预览通道。
-        nebulaPlugin.openFile({
-          mount: resolved.mount,
-          name: fileName,
-          path: resolved.nebulaPath,
-        })
-        return true
+
+        try {
+          // 与侧边栏里双击文件完全同一条路径：交给对方决定用哪个预览通道。
+          await client.openFile({ name: fileName, path: resolved.fsPath })
+          return true
+        } catch (error) {
+          showMessage(
+            t("messageLocalFsOpenFailed", {
+              error: error instanceof Error ? error.message : String(error),
+            }),
+            5000,
+            "error",
+          )
+          return false
+        }
       }
 
       /**
@@ -2021,7 +1975,7 @@ export function useCanvasEditor(
       duplicateSelection,
       getRenderedMarkdown,
       handleClipboardImagePaste,
-      insertNebulaFileNode,
+      insertLocalFsFileNode,
       insertSiyuanAssetNode,
       handleStageDragOver,
       handleStageDrop,

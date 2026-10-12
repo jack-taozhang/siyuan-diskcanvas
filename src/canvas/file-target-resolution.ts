@@ -54,19 +54,27 @@ export interface ResolvedCanvasNestedTarget {
 }
 
 /**
- * 网盘文件节点。
+ * 「本机存储」文件节点（跑着思源那台机器上的文件，如 NAS 的 /vol1）。
  *
- * `path` 采用带协议前缀的形式：`nebula://<mount>/<path>`，
- * 这样它既能存进标准 JSON Canvas 的 `file` 字段（纯字符串，Obsidian 也能识别为外链），
- * 又能在解析时与思源文档路径 / 本地路径明确区分开、不会误判。
+ * `path` 采用带协议前缀的形式：`localfs://<绝对路径去前导斜杠>`，
+ * 例如 `/vol1/1000/照片/a.png` → `localfs://vol1/1000/照片/a.png`。
+ *
+ * ★ 为什么必须带协议前缀（不能直接存 `/vol1/...`）★
+ *   画布节点的 `file` 字段是一个裸字符串，解析时无法只靠形状区分
+ *   "思源工作区里的路径"与"本机存储上的路径"。
+ *   实测后果：`/vol1/1000/a.png` 会命中 `IMAGE_PATH_PATTERN`，
+ *   被当成**思源图片资源**去 assets 表查询并渲染，显示必然错。
+ *   协议前缀让"这是本机存储文件"这件事在解析第一步就能确定。
+ *
+ * ★ 为什么仍然是一个普通字符串 ★
+ *   `file` 字段要存进标准 JSON Canvas（可被 Obsidian 等其它工具打开），
+ *   只能是字符串。带前缀的 URI 形态两边都满足。
  */
-export interface ResolvedCanvasNebulaTarget {
-  /** 挂载点名，对应 NebulaDisk 的 mount */
-  mount: string
-  /** 挂载点内的相对路径，例如 /design/wireframe.png */
-  nebulaPath: string
-  kind: "nebula"
-  /** 原样存储的 nebula:// 地址 */
+export interface ResolvedCanvasLocalFsTarget {
+  /** 去掉协议前缀后的**绝对路径**，如 /vol1/1000/照片/a.png */
+  fsPath: string
+  kind: "localfs"
+  /** 原样存储的 localfs:// 地址 */
   path: string
   title: string
 }
@@ -81,7 +89,7 @@ export type ResolvedCanvasFileTarget =
   | ResolvedCanvasBlockTarget
   | ResolvedCanvasDocumentTarget
   | ResolvedCanvasNestedTarget
-  | ResolvedCanvasNebulaTarget
+  | ResolvedCanvasLocalFsTarget
   | ResolvedCanvasImageTarget
   | ResolvedCanvasAssetTarget
   | ResolvedCanvasFileFallbackTarget
@@ -100,40 +108,39 @@ const EMBEDDED_BLOCK_ID_PATTERN = /\{:[^}]*\bid="(\d{14}-[a-z0-9]{7})"[^}]*\}/i
 const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/
 const IMAGE_PATH_PATTERN = /\.(avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i
 
-/** 网盘文件协议前缀。形如 nebula://media/design/wireframe.png */
-export const NEBULA_SCHEME = "nebula://"
+/** 本机存储协议前缀。形如 localfs://vol1/1000/照片/a.png */
+export const LOCALFS_SCHEME = "localfs://"
 
-/** 把 mount + 路径组装成 nebula:// 地址 */
-export function buildNebulaUri(mount: string, nebulaPath: string): string {
-  const cleanMount = mount.trim().replace(/^\/+|\/+$/g, "")
-  const cleanPath = nebulaPath.trim().replace(/^\/+/, "")
-  return `${NEBULA_SCHEME}${cleanMount}/${cleanPath}`
+/**
+ * 把**绝对路径**组装成 localfs:// 地址。
+ * 例：`/vol1/1000/照片/a.png` → `localfs://vol1/1000/照片/a.png`
+ *
+ * 前导斜杠统一去掉：协议头里已经隐含了"从根开始"，
+ * 留着会得到 `localfs:///vol1/…` 这种三斜杠形态 —— 合法但难读，
+ * 而且与解析端的归一化规则容易产生第二套写法。
+ */
+export function buildLocalFsUri(fsPath: string): string {
+  const clean = String(fsPath || "").trim().replace(/\\/g, "/").replace(/^\/+/, "")
+  return `${LOCALFS_SCHEME}${clean}`
 }
 
 /**
- * 解析 nebula:// 地址。
- * 容错：mount 与路径之间允许缺斜杠、允许多重斜杠、允许 mount 为空。
+ * 解析 localfs:// 地址。
+ * 容错：前缀**大小写不敏感**、允许多重前导斜杠。
  */
-export function parseNebulaUri(uri: string): { mount: string, nebulaPath: string } | null {
+export function parseLocalFsUri(uri: string): { fsPath: string } | null {
   const trimmed = uri.trim()
-  if (!trimmed.toLowerCase().startsWith(NEBULA_SCHEME)) {
+  if (!trimmed.toLowerCase().startsWith(LOCALFS_SCHEME)) {
     return null
   }
 
-  const rest = trimmed.slice(NEBULA_SCHEME.length)
-  const slash = rest.indexOf("/")
-  if (slash < 0) {
-    // 只有 mount，没有路径 —— 视为非法（没有文件名无法建卡片）
+  const rest = trimmed.slice(LOCALFS_SCHEME.length).replace(/^\/+/, "")
+  if (!rest) {
+    // 只有协议头、没有路径 —— 无法建卡片
     return null
   }
 
-  const mount = rest.slice(0, slash).trim()
-  const nebulaPath = "/" + rest.slice(slash + 1).replace(/^\/+/, "")
-  if (!mount || nebulaPath === "/") {
-    return null
-  }
-
-  return { mount, nebulaPath }
+  return { fsPath: "/" + rest }
 }
 
 function getFallbackTitle(path: string): string {
@@ -183,16 +190,15 @@ export async function resolveCanvasFileTarget(
     }
   }
 
-  // 网盘文件：nebula://<mount>/<path>。必须最先判断 ——
-  // 否则会被后面的路径分支当成普通文件 fallback 掉。
-  const nebula = parseNebulaUri(trimmed)
-  if (nebula) {
+  // 本机存储文件：localfs://<绝对路径>。必须最先判断 ——
+  // 否则 `/vol1/…/a.png` 会被后面的 IMAGE_PATH_PATTERN 当成思源图片资源。
+  const localFs = parseLocalFsUri(trimmed)
+  if (localFs) {
     return {
-      kind: "nebula",
-      mount: nebula.mount,
-      nebulaPath: nebula.nebulaPath,
+      fsPath: localFs.fsPath,
+      kind: "localfs",
       path: trimmed,
-      title: getFallbackTitle(nebula.nebulaPath),
+      title: getFallbackTitle(localFs.fsPath),
     }
   }
 

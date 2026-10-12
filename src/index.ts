@@ -27,7 +27,7 @@ import {
 } from "@/canvas/plugin-data"
 import { openCanvasPluginSettingsPanel } from "@/canvas/plugin-settings-panel"
 import { detectCanvasPluginRuntime } from "@/canvas/plugin-runtime"
-import { refreshNebulaClient } from "@/canvas/nebula-client-provider"
+import { refreshLocalFsClient } from "@/canvas/localfs-client-provider"
 import { openTextInputDialog } from "@/canvas/text-input-dialog"
 import { openCanvasFilePickerDialog } from "@/canvas/canvas-file-picker-dialog"
 import {
@@ -462,7 +462,7 @@ export default class SiyuanCanvasPlugin extends Plugin {
       },
     })
     await this.persistCanvasData()
-    refreshNebulaClient()
+    refreshLocalFsClient()
   }
 
   public async updateCanvasUiState(ui: Partial<CanvasPluginUiState>): Promise<void> {

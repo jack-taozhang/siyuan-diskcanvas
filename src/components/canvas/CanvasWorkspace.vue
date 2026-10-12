@@ -1378,15 +1378,15 @@
           </button>
           <button
             class="bottom-toolbar__button"
-            data-testid="bottom-toolbar-nebula"
-            :aria-label="t('bottomToolbarNebula')"
-            :data-tooltip="t('bottomToolbarNebula')"
+            data-testid="bottom-toolbar-localfs"
+            :aria-label="t('bottomToolbarLocalFs')"
+            :data-tooltip="t('bottomToolbarLocalFs')"
             type="button"
-            @click.stop="openNebulaPicker"
+            @click.stop="openLocalFsPicker"
           >
             <CanvasIcon
               class="bottom-toolbar__icon"
-              name="nebula"
+              name="localfs"
             />
           </button>
           <button
@@ -1581,9 +1581,9 @@
             ★ 编辑卡片抬头文本（第 39 轮）★
 
             注意与上面那个「编辑」按钮的区别：那个在文件类节点上是**打开**
-            （笔记 / 网盘文件都在页签里打开），文本类节点上才是编辑正文。
+            （笔记 / 本机存储文件都在页签里打开），文本类节点上才是编辑正文。
             这一个专门改卡片顶部那一行文字（现在显示的是「文本」「画布文件」
-            「思源笔记」「内部文件」「网盘文件」这类类型名）。
+            「思源笔记」「内部文件」「本机存储文件」这类类型名）。
           -->
           <button
             v-if="canEditNodeHeaderTitle"
@@ -1756,19 +1756,20 @@
     />
 
     <!--
-      ★ 只以 nebulaPickerVisible 为闸门，不再要求 client 非空 ★
-        client 为 null（设置里缺 baseUrl/username/password 任一项）时，
-        对话框应弹出并显示「未配置 → 去设置」引导；
-        此前写成 `... && nebulaPickerClient` 会把对话框整个挡掉，
-        使组件内 `!configured` 引导分支永远走不到（点按钮毫无反应）。
+      ★ 只以 localFsPickerVisible 为闸门，**不要求 client 非空** ★
+        client 为 null（没装 / 没启用「本机存储」插件）时，
+        对话框仍要弹出并显示「未检测到插件 → 去设置」引导；
+        写成 `... && localFsPickerClient` 会把对话框整个挡掉，
+        使组件内 `!client` 分支永远走不到（点按钮毫无反应）。
     -->
-    <CanvasNebulaPickerDialog
-      v-if="nebulaPickerVisible"
-      :client="nebulaPickerClient"
+    <CanvasLocalFsPickerDialog
+      v-if="localFsPickerVisible"
+      :client="localFsPickerClient"
+      :favorites="localFsPickerFavorites"
       :t="t"
-      @close="closeNebulaPicker"
-      @insert="onNebulaFileInserted"
-      @open-settings="openNebulaSettings"
+      @close="closeLocalFsPicker"
+      @insert="onLocalFsFileInserted"
+      @open-settings="openLocalFsSettings"
     />
 
     <!--
@@ -1863,7 +1864,7 @@ import { openHelpDialog } from "@/canvas/help-dialog"
 import CanvasFileCard from "@/components/canvas/CanvasFileCard.vue"
 import CanvasFileManagerDialog from "@/components/canvas/CanvasFileManagerDialog.vue"
 import CanvasMinimap from "@/components/canvas/CanvasMinimap.vue"
-import CanvasNebulaPickerDialog from "@/components/canvas/CanvasNebulaPickerDialog.vue"
+import CanvasLocalFsPickerDialog from "@/components/canvas/CanvasLocalFsPickerDialog.vue"
 import CanvasPngExportDialog from "@/components/canvas/CanvasPngExportDialog.vue"
 import type {
   CanvasPngExportBackgroundMode,
@@ -1878,8 +1879,8 @@ import CanvasAssetPickerDialog from "@/components/canvas/CanvasAssetPickerDialog
 import type { CanvasAssetPickerOption } from "@/canvas/asset-picker"
 import { toAssetPickerOption } from "@/canvas/asset-picker"
 import { findSiyuanAssetsByQuery } from "@/canvas/siyuan-kernel-file-node-lookups"
-import { getNebulaClient } from "@/canvas/nebula-client-provider"
-import type { NebulaClient } from "@/resources/nebula-client"
+import { getLocalFsClient } from "@/canvas/localfs-client-provider"
+import type { LocalFsContractClient } from "@/canvas/localfs-client"
 import {
   CLEAR_SELECTION_COLOR,
   getCanvasNodeContentStyle as resolveCanvasNodeContentStyle,
@@ -2001,26 +2002,32 @@ const canvasShellInlineStyle = {
 } as const
 
 /**
- * 网盘选择器。
+ * 「本机文件」选择器。
  *
- * client 必须**在打开瞬间**解析（而不是挂载时）——用户在设置里改完网盘地址后
- * 回到画布点按钮，拿到的必须是新配置。provider 的签名机制会在设置变更时重建实例。
+ * ★ client 必须**在打开瞬间**解析（而不是挂载时）★
+ *   「本机存储」插件重载会换掉 `window.__localfsPlugin` 上的契约对象；
+ *   provider 按对象身份判断是否重建，所以每次点按钮都重新取一次，
+ *   拿到的永远是当前那一个。
+ *
+ * ★ 常用文件夹也在打开瞬间取 ★
+ *   用户在设置面板里刚加的目录，回到画布点按钮就该生效。
  */
-const nebulaPickerVisible = ref(false)
-const nebulaPickerClient = ref<NebulaClient | null>(null)
+const localFsPickerVisible = ref(false)
+const localFsPickerClient = ref<LocalFsContractClient | null>(null)
+const localFsPickerFavorites = ref<string[]>([])
 
-function openNebulaPicker() {
-  const client = getNebulaClient(editor.getPluginSettings().nebula)
-  nebulaPickerVisible.value = true
-  nebulaPickerClient.value = client
+function openLocalFsPicker() {
+  localFsPickerVisible.value = true
+  localFsPickerClient.value = getLocalFsClient()
+  localFsPickerFavorites.value = [...editor.getPluginSettings().localFs.favorites]
 }
 
-function closeNebulaPicker() {
-  nebulaPickerVisible.value = false
+function closeLocalFsPicker() {
+  localFsPickerVisible.value = false
 }
 
-function openNebulaSettings() {
-  closeNebulaPicker()
+function openLocalFsSettings() {
+  closeLocalFsPicker()
   const pluginWithSettings = props.plugin as Plugin & { openCanvasSettings?: () => void, openSetting?: () => void }
   if (typeof pluginWithSettings.openCanvasSettings === "function") {
     pluginWithSettings.openCanvasSettings()
@@ -2029,17 +2036,17 @@ function openNebulaSettings() {
   pluginWithSettings.openSetting?.()
 }
 
-async function onNebulaFileInserted(payload: { mount: string, path: string, name: string }) {
-  closeNebulaPicker()
+async function onLocalFsFileInserted(payload: { name: string, path: string }) {
+  closeLocalFsPicker()
   // 只插文件；目录双击是「进入」而不是「插入」，选择器已保证不会把目录传出来。
-  await editor.insertNebulaFileNode(payload.mount, payload.path)
-  showMessage(t("messageNebulaInserted", { name: payload.name }), 2500)
+  await editor.insertLocalFsFileNode(payload.path)
+  showMessage(t("messageLocalFsInserted", { name: payload.name }), 2500)
 }
 
 /**
  * 「思源资源」选择器。
  *
- * 与网盘选择器的差别：资源来自思源内核本地库（`assets` 表），
+ * 与「本机文件」选择器的差别：资源来自思源内核本地库（`assets` 表），
  * 不需要连接测试与配置引导 —— 内核可达即可，因此没有 `configured` 分支。
  */
 const assetPickerVisible = ref(false)
@@ -2484,11 +2491,11 @@ const showNodeHeader = computed(() => {
  * 卡片抬头文本的就地编辑（第 39 轮）
  *
  * 用户原话：「卡片增开编辑 最顶部 文本功能 / 编辑和修改目前显示文本、画布、
- *            思源笔记、内部文件、网盘文件 这些位置的显示内容。」
+ *            思源笔记、内部文件、本机存储文件 这些位置的显示内容。」
  *
  * ★ 与已有的「编辑」按钮不是一回事 ★
  *   `selection-toolbar-edit`（`handleToolbarEdit` → `handleNodeDoubleClick`）在
- *   file 节点上是**打开**（笔记开页签、网盘文件开页签），在 text/query 上是编辑正文。
+ *   file 节点上是**打开**（笔记开页签、本机存储文件开页签），在 text/query 上是编辑正文。
  *   这里新增的是**抬头那一行文本**的编辑 —— 单独一个按钮、单独一套状态。
  *
  * 落盘：写进节点的 `headerTitle`（见 types.ts）。空串 = 删字段 = 恢复默认类型名。
@@ -2536,7 +2543,7 @@ function startNodeHeaderEditing() {
   /**
    * ★ 草稿预填"当前看到的文本"而不是只有自定义值 ★
    *
-   * 用户看到的抬头可能是自动推导出来的类型名（例如「网盘文件」）。
+   * 用户看到的抬头可能是自动推导出来的类型名（例如「本机存储文件」）。
    * 如果草稿留空，用户得自己猜"原来写的是什么"；预填当前显示值，
    * 用户可以直接在它基础上改（这才是"编辑和修改目前显示的内容"）。
    */
@@ -2942,19 +2949,20 @@ function handleShellCaptureDragOver(event: DragEvent) {
   }
 
   /**
-   * ★ ② 网盘 dock 拖入 → **也必须放行**（第 17 轮修「拖入显示禁止光标、无反应」）★
+   * ★ ② 「本机存储」文件树拖入 → **也必须放行** ★
    *
    * 这个处理器挂在根容器的**捕获阶段**，`stopPropagation()` 会**在事件下行时就把事件掐死**，
    * 舞台上的 `@dragover`（冒泡阶段）**根本收不到** ⇒ 没人 `preventDefault()`
    * ⇒ 浏览器判定"此处不接受拖放"，显示**禁止光标**，并且**永远不会派发 drop**。
    *
-   * 实测症状与用户反馈完全一致：「拖入 鼠标显示禁止图标，拖入放后没有发生任何变化」。
-   * 而且这条拦截是"自己人拦自己人" —— 网盘拖拽恰恰不是 `Files` 类型。
+   * 实测症状（本机存储拖拽时期踩过同一个坑）：
+   * 「拖入 鼠标显示禁止图标，拖入放后没有发生任何变化」。
+   * 而且这条拦截是"自己人拦自己人" —— 插件拖拽的 MIME 恰恰不是 `Files` 类型。
    *
    * 注意：放过 dragover **不等于**会重复插入。真正防重复是在 **drop** 阶段
-   * `stopPropagation()`（见 use-canvas-editor 的 `nebulaDrop`）。
+   * `stopPropagation()`（见 use-canvas-editor 的 `localFsDrop`）。
    */
-  if (types && Array.from(types).includes("application/x-nebuladisk-embed")) {
+  if (types && Array.from(types).includes("application/x-localfs-embed")) {
     return
   }
 
@@ -3116,9 +3124,9 @@ const isStandalonePage = computed(() => props.bootstrap?.standalone === true)
  *
  * ★ 为什么用 `window.open` 且**不加 `noopener`** ★
  *   `noopener` 会让新页面拿不到 `window.opener`。而独立页正是靠
- *   `window.opener.__nebuladiskPlugin` 复用网盘插件的能力（同源，见
+ *   `window.opener.__localfsPlugin` 复用「本机存储」插件的能力（同源，见
  *   `src/standalone.ts` 的 `readOpenerBridge`）。加了 `noopener`
- *   等于把网盘能力一起关掉 —— 这是**功能性依赖**，不是安全疏忽：
+ *   等于把本机存储能力一起关掉 —— 这是**功能性依赖**，不是安全疏忽：
  *   两个窗口同源、同属用户自己的思源实例，不存在跨站风险。
  *
  * ★ 拿不到 `editor.state.filePath` 时怎么办 ★
@@ -3552,7 +3560,7 @@ function getNodeHeaderBadge(node: CanvasNode): string {
  *
  * ★ 为什么要把它单独抽出来 ★
  *   编辑抬头时输入框会**预填当前显示的文本**（可能是自动推导出来的类型名，
- *   例如「文本」/「网盘文件」）。如果用户只是点开又直接确认，那段文本会被
+ *   例如「文本」/「本机存储文件」）。如果用户只是点开又直接确认，那段文本会被
  *   当成自定义值写进节点 —— 两个坏处：
  *     ① 无意义的写盘 / 脏标记；
  *     ② **语义被固化**：以后推导逻辑或 i18n 文案改了，这个节点不再跟着变。
@@ -3580,25 +3588,25 @@ function getDerivedNodeHeaderTitle(node: CanvasNode): string {
      * ★ 卡片抬头显示「类型名」而不是文件名（第 18 轮，用户要求）★
      *
      * 用户原话：
-     *   2、网盘文件目前显示的是文件名，改为「网盘文件」
+     *   2、本机存储文件目前显示的是文件名，改为「本机存储文件」
      *   3、思源资源显示的也是文件名，改为「内部文件」
      *   4、如果是关联的思源笔记显示 NotePage，如果是思源块显示 Block
      *
      * 为什么按**解析结果**而不是文件名判断：文件名（`node.file`）对
-     * 网盘 / 思源资源 / 笔记 / 块来说都只是一个路径串，看不出"它是什么"；
+     * 本机存储 / 思源资源 / 笔记 / 块来说都只是一个路径串，看不出"它是什么"；
      * 而 `getResolvedFileNode` 给出的 `kind` 才是类型的事实来源。
      *
      * 兜底：解析尚未完成（异步）时退回原来的文件名，避免抬头空白。
      *
-     * ★ 嵌套画布（`canvas`）也显示类型名（第 35 轮，用户要求「风格与网盘文件块一致」）★
+     * ★ 嵌套画布（`canvas`）也显示类型名（第 35 轮，用户要求「风格与本机存储文件块一致」）★
      *   此前它**没有分支**，直接落到下面 `getNodeTitle` 的兜底 ——
-     *   于是抬头显示的是**文件名**（`未命名43.canvas`），而网盘卡片显示的是
-     *   **类型名**（`网盘文件`）。两张卡片放在一起时抬头语义不一致。
-     *   现在统一：抬头 = 类型名，文件名下移到正文第一行（与网盘卡片同构）。
+     *   于是抬头显示的是**文件名**（`未命名43.canvas`），而本机存储卡片显示的是
+     *   **类型名**（`本机存储文件`）。两张卡片放在一起时抬头语义不一致。
+     *   现在统一：抬头 = 类型名，文件名下移到正文第一行（与本机存储卡片同构）。
      */
     const resolvedKind = editor.getFileNodeKind?.(node)
-    if (resolvedKind === "nebula") {
-      return t("nodeKindNebulaFile")
+    if (resolvedKind === "localfs") {
+      return t("nodeKindLocalFsFile")
     }
     if (resolvedKind === "asset" || resolvedKind === "image") {
       return t("nodeKindAssetFile")
@@ -3631,7 +3639,7 @@ function getDerivedNodeHeaderTitle(node: CanvasNode): string {
  * 抬头实际显示的文本：**用户自定义优先，缺省回退到推导值**。
  *
  * 用户原话：「卡片增开编辑 最顶部 文本功能 / 编辑和修改目前显示文本、画布、
- *            思源笔记、内部文件、网盘文件 这些位置的显示内容。」
+ *            思源笔记、内部文件、本机存储文件 这些位置的显示内容。」
  *
  * 清空输入框 ⇒ `headerTitle` 被删 ⇒ 自动回到类型名（见 `commitNodeHeaderEditing`）。
  */
@@ -3673,7 +3681,7 @@ function shouldShowFileCardHeadline(node: CanvasNode) {
    * ★ 画布卡片不再在正文里显示标题行（第 35 轮）★
    *
    * 「画布文件」这个固定标题已经移到**卡片抬头**（`getNodeHeaderTitle` 的
-   * `canvas` 分支），与网盘卡片（抬头 = 「网盘文件」）结构一致。
+   * `canvas` 分支），与本机存储卡片（抬头 = 「本机存储文件」）结构一致。
    * 正文只保留两行：文件名（`.file-card__canvas-name`）+ 路径（`.file-card__path-line`）。
    * ⇒ 这里要让 canvas 走 false，否则会在正文里多渲染一行重复的文件名。
    */
@@ -3711,7 +3719,7 @@ function shouldShowFileCardHelper(node: CanvasNode) {
     return false
   }
 
-  // 网盘文件（nebula）曾经落到 file 兜底分支，卡片上会多出一行英文
+  // 本机存储文件曾经落到 file 兜底分支，卡片上会多出一行英文
   // 「Double click to open」。用户要求去掉 ⇒ 这里连同 helper 一起不显示。
   if (!preview.helper) {
     return false

@@ -65,18 +65,24 @@ export type CanvasIconName =
   | 'sprout'
   | 'ai-search'
   | 'loading-spinner'
-  | 'nebula'
+  | 'localfs'
   | 'note'
   | 'asset'
   | 'open-external'
   | 'grid'
 
 export const CANVAS_ICON_MARKUP: Record<CanvasIconName, string> = {
-  // 网盘：云 + 向下箭头（"从云端取下来"）
-  nebula: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 36C9.58172 36 6 32.4183 6 28C6 23.5817 9.58172 20 14 20C14.5 20 15 20.05 15.5 20.13C16.8 15.32 21.18 11.76 26.4 11.76C32 11.76 36.7 15.85 37.72 21.32C41.3 21.9 44 25.02 44 28.77C44 32.76 40.76 36 36.77 36H14Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 26V41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 35.5L24 41L29.5 35.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  /**
+   * 本机存储：**硬盘**（圆角机身 + 一条分隔线 + 指示灯 + 两侧短横）。
+   *
+   * 刻意不用「云 + 向下箭头」（那是网盘/云端的语义，与"跑着思源那台机器上的
+   * 存储空间"正好相反），也不用「文件夹」——那会与相邻的「思源资源」图标混。
+   * 「机身 + 指示灯」在小尺寸下轮廓清楚，一眼就是"一块盘"。
+   */
+  localfs: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="10" width="36" height="28" rx="5" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M6 27H42" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="15" cy="33" r="2.5" fill="currentColor"/><path d="M24 33H35" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M20 18H28" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,
   // 笔记：文档 + 书签/文字行
   note: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 6C9 4.89543 9.89543 4 11 4H30L41 15V42C41 43.1046 40.1046 44 39 44H11C9.89543 44 9 43.1046 9 42V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M30 4V15H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 24H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 32H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  // 思源资源：图片框 + 山形 + 太阳（区别于网盘的"云"与笔记的"文档"）
+  // 思源资源：图片框 + 山形 + 太阳（区别于本机存储的"硬盘"与笔记的"文档"）
   asset: `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="9" width="36" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="17" cy="19" r="3.5" fill="none" stroke="currentColor" stroke-width="3"/><path d="M8 34L18 24L26 32L32 26L40 34" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   /**
    * 「在独立网页中打开」—— 方框 + 右上角外跳箭头（通用 external-link 语义）。

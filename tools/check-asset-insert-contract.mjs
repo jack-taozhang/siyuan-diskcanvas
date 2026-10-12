@@ -78,7 +78,7 @@ check(
   /bottom-toolbar-asset[\s\S]{0,400}?openAssetPicker/.test(workspace),
 )
 check(
-  "按钮用独立图标 name=\"asset\"（不与 note/nebula 复用）",
+  "按钮用独立图标 name=\"asset\"（不与 note/localfs 复用）",
   /data-testid="bottom-toolbar-asset"[\s\S]{0,400}?name="asset"/.test(workspace),
 )
 

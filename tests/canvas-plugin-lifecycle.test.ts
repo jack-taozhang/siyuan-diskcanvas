@@ -700,17 +700,22 @@ describe("canvas plugin lifecycle", () => {
     expect(setting.options).toEqual({ width: "620px" })
     expect(setting.open).toHaveBeenCalledWith("siyuan-diskcanvas")
 
-    // 设置项顺序对齐当前面板：① 画布基础 ② 显示
-    // ★ 第 13/15 轮：画布**不再**单独配置网盘 ⇒ 原来的「网盘连接」组整块删除，
-    //   所有索引整体前移（本次再前移 1）。
-    const defaultDirectoryInput = setting.items[0].createActionElement() as HTMLInputElement
-    const recentFilesLimitInput = setting.items[2].createActionElement() as HTMLInputElement
-    const detectExternalChangesInput = setting.items[3].createActionElement() as HTMLInputElement
-    const colorThemeSelect = setting.items[5].createActionElement() as HTMLSelectElement
-    const showCanvasThumbnailsInput = setting.items[6].createActionElement() as HTMLInputElement
-    const showNodeHeaderInput = setting.items[7].createActionElement() as HTMLInputElement
-    const showDragAlignmentGuidesInput = setting.items[8].createActionElement() as HTMLInputElement
+    // 设置项顺序对齐当前面板：① 本机存储 ② 画布基础 ③ 显示
+    // ★ 第 13/15 轮：画布**不再**单独配置网盘 ⇒ 原来的「网盘连接」组整块删除。
+    // ★ 本轮：「本机文件」入口上线，面板最前面多了「常用文件夹」组（items[0]）
+    //   ⇒ 后面所有索引再整体前移 1。
+    const localFsFavoritesBox = setting.items[0].createActionElement() as HTMLElement
+    const defaultDirectoryInput = setting.items[1].createActionElement() as HTMLInputElement
+    const recentFilesLimitInput = setting.items[3].createActionElement() as HTMLInputElement
+    const detectExternalChangesInput = setting.items[4].createActionElement() as HTMLInputElement
+    const colorThemeSelect = setting.items[6].createActionElement() as HTMLSelectElement
+    const showCanvasThumbnailsInput = setting.items[7].createActionElement() as HTMLInputElement
+    const showNodeHeaderInput = setting.items[8].createActionElement() as HTMLInputElement
+    const showDragAlignmentGuidesInput = setting.items[9].createActionElement() as HTMLInputElement
 
+    // 「常用文件夹」组：默认没有收藏 ⇒ 显示空态文案（说明它是**真渲染**出来的，
+    // 而不是一个占位条目 —— 后面的索引位移才有意义）
+    expect(localFsFavoritesBox.querySelector(".dcn-favorites__empty")).not.toBeNull()
     expect(colorThemeSelect.value).toBe("classic")
     expect(defaultDirectoryInput.value).toBe("/data/storage/petal/siyuan-diskcanvas")
     expect(recentFilesLimitInput.value).toBe("8")

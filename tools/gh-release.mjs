@@ -16,8 +16,8 @@
  *      本脚本默认**只在新建时写 body**，已存在时仅打印现有 body 供人工判断。
  *
  * 用法：
- *   node tools/gh-release.mjs --tag v0.2.24 --asset dist-package/siyuan-diskcanvas-v0.2.24.zip \
- *        [--target <sha|branch>] [--title "DiskCanvas 盘绘 v0.2.24"] \
+ *   node tools/gh-release.mjs --tag v0.2.32 --asset dist-package/siyuan-diskcanvas-v0.2.32.zip \
+ *        [--target <sha|branch>] [--title "盘绘 v0.2.32"] \
  *        [--notes "markdown"] [--notes-file path.md] [--update-body]
  */
 import { readFileSync, statSync } from "node:fs"
